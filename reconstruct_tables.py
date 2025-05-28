@@ -50,5 +50,32 @@ CREATE TABLE IF NOT EXISTS games (
 )
 ''')
 
+
+cursor.execute('''
+CREATE TABLE IF NOT EXISTS players (
+    player_id INTEGER PRIMARY KEY,
+    full_name TEXT,
+    first_name TEXT,
+    last_name TEXT,
+    use_name TEXT,
+    middle_name TEXT,
+    boxscore_name TEXT,
+    primary_number TEXT,
+    birth_date TEXT,
+    current_age INTEGER,
+    birth_city TEXT,
+    birth_state TEXT,
+    birth_country TEXT,
+    height TEXT,
+    weight INTEGER,
+    active BOOLEAN,
+    is_verified BOOLEAN,
+    primary_position TEXT,
+    bat_side TEXT,
+    pitch_hand TEXT,
+    mlb_debut TEXT
+)
+''')
+
 conn.commit()
 conn.close()

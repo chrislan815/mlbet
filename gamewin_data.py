@@ -18,5 +18,5 @@ import statsapi
 
 
 game_id = 777751  # Must be an integer
-data = statsapi.get('game', {'gamePk': game_id})
+data = statsapi.get('game_contextMetrics', {'gamePk': game_id})
 print(data)
