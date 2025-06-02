@@ -1,3 +1,5 @@
+# https://storage.googleapis.com/gcp-mlb-hackathon-2025/datasets/mlb-statsapi-docs/StatsAPI-Spec.json
+# https://github.com/JavierPalomares90/pypitchfx
 # https://journal.r-project.org/archive/2014-1/sievert.pdf
 import sqlite3
 from calendar import monthrange
