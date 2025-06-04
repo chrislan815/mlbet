@@ -6,4 +6,4 @@ def print_flatten_schema(data, prefix=''):
     elif isinstance(data, list):
         print(f">>> {prefix}")
     else:
-        print(f"{prefix}")
+        print(f"{prefix} value is {data}")
