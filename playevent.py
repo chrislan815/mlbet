@@ -358,18 +358,26 @@ def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitch):
 
     cursor.execute(sql, values)
 
-logging.basicConfig(level=logging.DEBUG)  # or INFO, WARNING, ERROR, CRITICAL
+# logging.basicConfig(level=logging.DEBUG)  # or INFO, WARNING, ERROR, CRITICAL
 
-game_id = 777745  # example game_pk
-pbp = statsapi.get('game_winProbability', {'gamePk': game_id})
 conn = sqlite3.connect("mlb.db")
 cursor = conn.cursor()
 
-for data in pbp:
-    for pe in data['playEvents']:
-        if not pe.get('details', {}).get('call', {}).get('code'):
-            continue
-        insert_pitch_data(cursor, game_id, data["about"]["atBatIndex"], pe)
+rows = cursor.execute("""
+    SELECT *
+    FROM game
+    WHERE status = 'Final'
+    ORDER BY game_pk DESC
+    LIMIT 100
+""").fetchall()
+for row in rows:
+    game_id = row[0]
+    print(game_id)
+    pbp = statsapi.get('game_winProbability', {'gamePk': game_id})
+    for data in pbp:
+        for pe in data['playEvents']:
+            if pe.get('details', {}).get('call', {}).get('code'):
+                insert_pitch_data(cursor, game_id, data["about"]["atBatIndex"], pe)
 
 conn.commit()
 conn.close()

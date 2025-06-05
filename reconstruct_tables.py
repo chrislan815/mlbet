@@ -6,7 +6,7 @@ cursor = conn.cursor()
 
 cursor.execute(
     """
-    drop table if exists games;
+    drop table if exists game;
     """
 )
 
