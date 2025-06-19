@@ -10,7 +10,6 @@ from asyncio_throttle import Throttler  # lightweight rate limiter
 
 logging.basicConfig(level=logging.INFO)
 
-API_ENDPOINT_TEMPLATE = "https://statsapi.mlb.com/api/v1/game/{gamePk}/winProbability"
 
 os.makedirs("games", exist_ok=True)
 
@@ -30,6 +29,7 @@ async def fetch_and_save(session, game_pk):
         return
 
     async with throttler:
+        API_ENDPOINT_TEMPLATE = "https://statsapi.mlb.com/api/v1/game/{gamePk}/winProbability"
         url = API_ENDPOINT_TEMPLATE.format(gamePk=game_pk)
         logging.info(f"Fetching {url}")
         async with session.get(url) as resp:

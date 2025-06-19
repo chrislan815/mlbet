@@ -1,3 +1,6 @@
+import gzip
+import json
+import os
 import sqlite3
 
 import glom
@@ -152,8 +155,8 @@ def flatten_pitch_data(game_pk, about_atBatIndex, pitch):
     }
 
 
-def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitch):
-    data = flatten_pitch_data(game_pk, about_atBatIndex, pitch)
+def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitches):
+    records = [flatten_pitch_data(game_pk, about_atBatIndex, pitch) for pitch in pitches]
     sql = """
     INSERT OR REPLACE INTO play_event (
         game_pk,
@@ -254,7 +257,7 @@ def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitch):
     )
     """
 
-    values = (
+    values = ((
         game_pk,
         about_atBatIndex,
         data.get('details_call_code'),
@@ -351,32 +354,55 @@ def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitch):
 
         data.get('offense_third_id'),
         data.get('offense_third_link'),
+    ) for data in records)
 
-    )
+    cursor.executemany(sql, values)
+    cursor.connection.commit()
 
-    cursor.execute(sql, values)
+def load_pbp_from_file(game_pk):
+    path = os.path.join("games", f"{game_pk}.json.gz")
+    if not os.path.exists(path):
+        print(f"Missing file: {path}")
+        return None
+
+    try:
+        with gzip.open(path, "rt", encoding="utf-8") as f:
+            data = json.load(f)
+        return data
+    except Exception as e:
+        print(f"Failed to load or parse {path}: {e}")
+        return None
 
 
 if __name__ == '__main__':
-    # logging.basicConfig(level=logging.DEBUG)  # or INFO, WARNING, ERROR, CRITICAL
     conn = sqlite3.connect("mlb.db")
     cursor = conn.cursor()
 
-    rows = cursor.execute("""
-        SELECT *
-        FROM game
-        WHERE status = 'Final'
-        ORDER BY game_pk DESC
-        LIMIT 100
-    """).fetchall()
+    processed_game_pks = {
+        row[0] for row in cursor.execute("SELECT DISTINCT game_pk FROM play_event")
+    }
+
+
+    rows = cursor.execute("SELECT distinct game_pk FROM atbat;").fetchall()
+
     for row in rows:
         game_id = row[0]
-        print(game_id)
-        pbp = statsapi.get('game_winProbability', {'gamePk': game_id})
-        for data in pbp:
-            for pe in data['playEvents']:
-                if pe.get('details', {}).get('call', {}).get('code'):
-                    insert_pitch_data(cursor, game_id, data["about"]["atBatIndex"], pe)
+        if game_id in processed_game_pks:
+            print(f"Skipping {game_id}, already processed.")
+            continue
 
-    conn.commit()
+        print(f"Processing game {game_id}...")
+        pbp = load_pbp_from_file(game_id)
+        if pbp is None:
+            print(f"{game_id}.json.gz has nothing...")
+            continue
+
+        for data in pbp:
+            pes = [
+                pe for pe in data.get('playEvents', [])
+                if pe.get('details', {}).get('call', {}).get('code')
+            ]
+            print(f"inserting {len(pes)} play events for {game_id}... atbat {data['about']['atBatIndex']}")
+            insert_pitch_data(cursor, game_id, data["about"]["atBatIndex"], pes)
+
     conn.close()

@@ -4,3 +4,4 @@ __pycache__/
 mlb.db
 games/
 .DS_Store
+identifier.sqlite
