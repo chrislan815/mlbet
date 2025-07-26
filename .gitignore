@@ -1,7 +1,8 @@
 .idea/
 venv
 __pycache__/
-mlb.db
 games/
 .DS_Store
-identifier.sqlite
+*.sqlite
+*.db
+live_feeds/

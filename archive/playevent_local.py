@@ -155,8 +155,8 @@ def flatten_pitch_data(game_pk, about_atBatIndex, pitch):
     }
 
 
-def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitches):
-    records = [flatten_pitch_data(game_pk, about_atBatIndex, pitch) for pitch in pitches]
+def insert_pitch_data(_cursor, game_pk, about_atbat_index, pitches):
+    records = [flatten_pitch_data(game_pk, about_atbat_index, pitch) for pitch in pitches]
     sql = """
     INSERT OR REPLACE INTO play_event (
         game_pk,
@@ -259,7 +259,7 @@ def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitches):
 
     values = ((
         game_pk,
-        about_atBatIndex,
+        about_atbat_index,
         data.get('details_call_code'),
         data.get('details_call_description'),
         data.get('details_description'),
@@ -356,8 +356,8 @@ def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitches):
         data.get('offense_third_link'),
     ) for data in records)
 
-    cursor.executemany(sql, values)
-    cursor.connection.commit()
+    _cursor.executemany(sql, values)
+    _cursor.connection.commit()
 
 def load_pbp_from_file(game_pk):
     path = os.path.join("games", f"{game_pk}.json.gz")
@@ -375,13 +375,12 @@ def load_pbp_from_file(game_pk):
 
 
 if __name__ == '__main__':
-    conn = sqlite3.connect("mlb.db")
+    conn = sqlite3.connect("mlb-v2.db")
     cursor = conn.cursor()
 
     processed_game_pks = {
         row[0] for row in cursor.execute("SELECT DISTINCT game_pk FROM play_event")
     }
-
 
     rows = cursor.execute("SELECT distinct game_pk FROM atbat;").fetchall()
 
