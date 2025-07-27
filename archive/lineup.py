@@ -3,6 +3,7 @@ import json
 import io
 import os
 import sqlite3
+import logging
 
 
 def flatten(data):
@@ -54,9 +55,12 @@ def insert_lineup_players(_cursor, game_id_team_type_lineup_players):
                 _data["position_name"],
                 _data["position_type"]
             ))
-
-    _cursor.executemany(sql, values)
-    _cursor.connection.commit()
+    try:
+        _cursor.executemany(sql, values)
+        _cursor.connection.commit()
+        logging.info(f"Inserted {len(values)} lineup player rows for game(s) {[gid for (gid, _, _) in game_id_team_type_lineup_players]}")
+    except Exception as e:
+        logging.error(f"Error inserting lineup players: {e}")
 
 def get_lineup(_game_id):
     filepath = f"live_feeds/{_game_id}.json.gz"
@@ -81,7 +85,25 @@ def get_lineup(_game_id):
         ]
     return _lineup
 
+def save_lineup_for_game(cursor, game_id):
+    lineup = get_lineup(game_id)
+    if not lineup:
+        logging.warning(f"No lineup found for game {game_id}")
+        return False
+    data_rows = []
+    for team_type in ["home", "away"]:
+        data = lineup[team_type]
+        data_rows.append((game_id, team_type, data))
+    try:
+        insert_lineup_players(cursor, data_rows)
+        logging.info(f"Saved lineup for game {game_id}")
+        return True
+    except Exception as e:
+        logging.error(f"Error saving lineup for game {game_id}: {e}")
+        return False
+
 if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
     conn = sqlite3.connect("mlb-v2.db")
     cursor = conn.cursor()
     rows = cursor.execute("""
@@ -92,20 +114,6 @@ if __name__ == '__main__':
         ) and status = 'Final'
         ORDER BY game_pk DESC;
     """).fetchall()
-    data_rows = []
     for row in rows:
         game_id = row[0]
-        lineup = get_lineup(game_id)
-        print(game_id)
-        if not lineup:
-            print(f"No lineup found for game {game_id}")
-            continue
-        for team_type in ["home", "away"]:
-            data = lineup[team_type]
-            data_rows.append(
-                (game_id, team_type, data)
-            )
-        if len(data_rows) > 10000:
-            print(f"Committing lineups")
-            insert_lineup_players(cursor, data_rows)
-            data_rows = []
+        save_lineup_for_game(cursor, game_id)

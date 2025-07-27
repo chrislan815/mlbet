@@ -10,6 +10,7 @@ import sqlite3
 
 from archive.game_data_month import save_game_to_db
 from archive.gamewin_data import fetch_and_save_win_probability_data
+from archive.lineup import save_lineup_for_game
 from archive.save_live_feed import fetch_and_save_live_feed_data
 
 
@@ -27,4 +28,4 @@ if __name__ == '__main__':
     [fetch_and_save_win_probability_data(game_pk) for game_pk in final_game_pks]
     [fetch_and_save_live_feed_data(game_pk) for game_pk in final_game_pks]
 
-    
+    [save_lineup_for_game(cursor, game_pk) for game_pk in final_game_pks]
