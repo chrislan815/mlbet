@@ -19,10 +19,12 @@ if __name__ == '__main__':
     cursor = conn.cursor()
 
     schedule = statsapi.schedule()
-    final_games = [g for g in schedule if g.get('status') == 'Final']
 
+    final_games = [g for g in schedule if g.get('status') == 'Final']
     [save_game_to_db(conn, game) for game in final_games]
 
     final_game_pks = [g['game_id'] for g in final_games]
     [fetch_and_save_win_probability_data(game_pk) for game_pk in final_game_pks]
     [fetch_and_save_live_feed_data(game_pk) for game_pk in final_game_pks]
+
+    
