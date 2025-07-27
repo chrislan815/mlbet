@@ -12,6 +12,8 @@ from archive.atbat_data_local import save_atbat_to_db
 from archive.game_data_month import save_game_to_db
 from archive.gamewin_data import save_win_probability_data
 from archive.lineup import save_lineup
+from archive.playevent_fix import save_hit_data
+from archive.playevent_local import save_play_events_to_db
 from archive.runners import save_runners
 from archive.save_live_feed import save_live_feed_data
 
@@ -32,4 +34,6 @@ if __name__ == '__main__':
     [save_lineup(cursor, game_pk) for game_pk in final_game_pks]
     save_runners(cursor, final_game_pks)
     [save_atbat_to_db(conn, game_pk) for game_pk in final_game_pks]
+    [save_play_events_to_db(cursor, game_pk) for game_pk in final_game_pks]
+    save_hit_data(cursor, final_game_pks)
 

@@ -365,6 +365,20 @@ def load_pbp_from_file(game_pk):
         print(f"Failed to load or parse {path}: {e}")
         return None
 
+def save_play_events_to_db(cursor, game_id):
+    pbp = load_pbp_from_file(game_id)
+    if pbp is None:
+        print(f"{game_id}.json.gz has nothing...")
+        return
+
+    for data in pbp:
+        pes = [
+            pe for pe in data.get('playEvents', [])
+            if pe.get('details', {}).get('call', {}).get('code')
+        ]
+        print(f"inserting {len(pes)} play events for {game_id}... atbat {data['about']['atBatIndex']}")
+        insert_pitch_data(cursor, game_id, data["about"]["atBatIndex"], pes)
+
 
 if __name__ == '__main__':
     conn = sqlite3.connect("mlb-v2.db")
@@ -383,17 +397,8 @@ if __name__ == '__main__':
             continue
 
         print(f"Processing game {game_id}...")
-        pbp = load_pbp_from_file(game_id)
-        if pbp is None:
-            print(f"{game_id}.json.gz has nothing...")
-            continue
 
-        for data in pbp:
-            pes = [
-                pe for pe in data.get('playEvents', [])
-                if pe.get('details', {}).get('call', {}).get('code')
-            ]
-            print(f"inserting {len(pes)} play events for {game_id}... atbat {data['about']['atBatIndex']}")
-            insert_pitch_data(cursor, game_id, data["about"]["atBatIndex"], pes)
+
+        save_play_events_to_db(cursor, game_id)
 
     conn.close()

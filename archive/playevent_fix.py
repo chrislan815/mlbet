@@ -78,23 +78,13 @@ def update_hit_data(_cursor, _data_rows: list[RowData]):
     _cursor.connection.commit()
 
 
-if __name__ == '__main__':
-    conn = sqlite3.connect("mlb-v2.db")
-    cursor = conn.cursor()
-
-    rows = cursor.execute("""
-                          SELECT game_pk
-                          FROM play_event
-                          GROUP BY game_pk
-                          HAVING SUM(CASE WHEN hitData_trajectory IS NOT NULL THEN 1 ELSE 0 END) = 0
-                          order by game_pk desc 
-                          limit 10000;
-                          """).fetchall()
+def save_hit_data(cursor, game_ids):
     data_rows: list[RowData] = []
-    for row in rows:
-        game_id = row[0]
+    for game_id in game_ids:
         print(game_id)
         pbp = load_win_probability_from_file(game_id)
+        if pbp is None:
+            continue
         for atbat in pbp:
             for pe in atbat['playEvents']:
                 if hit_data := pe.get('hitData'):
@@ -108,12 +98,28 @@ if __name__ == '__main__':
                             hit_data=flatten_hit_data(hit_data)
                         )
                     )
-        # for data_row in data_rows:
-        #     print(data_row.game_id, data_row.atbat_index, data_row.pitch_number, data_row.hit_data)
         if len(data_rows) > 50000:
             print(f"update {len(data_rows)} rows")
             update_hit_data(cursor, data_rows)
             data_rows = []
+    if data_rows:
+        print(f"update {len(data_rows)} rows")
+        update_hit_data(cursor, data_rows)
+
+
+if __name__ == '__main__':
+    conn = sqlite3.connect("mlb-v2.db")
+    cursor = conn.cursor()
+    rows = cursor.execute("""
+                          SELECT game_pk
+                          FROM play_event
+                          GROUP BY game_pk
+                          HAVING SUM(CASE WHEN hitData_trajectory IS NOT NULL THEN 1 ELSE 0 END) = 0
+                          order by game_pk desc 
+                          limit 10000;
+                          """).fetchall()
+    game_ids = [row[0] for row in rows]
+    save_hit_data(cursor, game_ids)
     conn.close()
 '''
 hitData_launchSpeed REAL
