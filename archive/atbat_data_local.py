@@ -82,28 +82,27 @@ def save_atbat(conn, game_id, pbp: dict):
         cursor.connection.commit()
 
 
+def save_atbat_to_db(connection, game_pk):
+    path = os.path.join("games", f"{game_pk}.json.gz")
+    if not os.path.exists(path):
+        print(f"Missing file: {path}")
+        return
+    print(f"Loading {path}")
+    with gzip.open(path, "rt", encoding="utf-8") as f:
+        data = json.load(f)
+    save_atbat(connection, game_pk, data)
+
+
 """ AtBat Data Schema
 >>> runners Array of Object => fkey atbat_id + populating the runnerIndex int
 >>> playEvents Array of Object => fkey atbat_id
 """
 if __name__ == '__main__':
     connection = sqlite3.connect("mlb-v2.db")
-
     rows = connection.cursor().execute("""
     SELECT g.game_pk FROM game g
     """)
-    # currently 6/6 2:44 2374989
     for row in rows:
         game_pk = int(row[0])
-        path = os.path.join("games", f"{game_pk}.json.gz")
-
-        if not os.path.exists(path):
-            print(f"Missing file: {path}")
-            continue
-
-        print(f"Loading {path}")
-        with gzip.open(path, "rt", encoding="utf-8") as f:
-            data = json.load(f)
-        save_atbat(connection, game_pk, data)
-
+        save_atbat_to_db(connection, game_pk)
     connection.close()
