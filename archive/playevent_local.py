@@ -3,14 +3,6 @@ import json
 import os
 import sqlite3
 
-import glom
-from pprint import pprint
-
-import statsapi
-import logging
-
-from utils import print_flatten_schema
-
 
 """ AtBat Data Schema
 (game_pk and about_atBatIndex)

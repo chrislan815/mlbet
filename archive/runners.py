@@ -3,13 +3,11 @@ import json
 import os
 import sqlite3
 
-import glom
-from pprint import pprint
+# import glom
+# from pprint import pprint
 
 import statsapi
 import logging
-
-from utils import print_flatten_schema
 
 
 """ runners Data Schema
@@ -104,7 +102,7 @@ def insert_pitch_data(cursor, game_pk, about_atBatIndex, runner_datas):
 def load_pbp_from_file(game_pk):
     path = os.path.join("games", f"{game_pk}.json.gz")
     if not os.path.exists(path):
-        print(f"Missing file: {path}")
+        logging.warning(f"Missing file: {path}")
         return None
 
     try:
@@ -112,37 +110,37 @@ def load_pbp_from_file(game_pk):
             data = json.load(f)
         return data
     except Exception as e:
-        print(f"Failed to load or parse {path}: {e}")
+        logging.error(f"Failed to load or parse {path}: {e}")
         return None
 
 
-if __name__ == '__main__':
-    conn = sqlite3.connect("mlb.db")
-    cursor = conn.cursor()
-
+def save_runners(cursor, game_ids):
     processed_game_pks = {
         row[0] for row in cursor.execute("SELECT DISTINCT game_pk FROM runner")
     }
-    print(f"Found processed_game_pks {len(processed_game_pks)} game ids")
+    logging.info(f"Found processed_game_pks {len(processed_game_pks)} game ids")
 
-    rows = cursor.execute("SELECT distinct game_pk FROM atbat;").fetchall()
-    print(f"Found unproccessed game pks {len(rows)} game ids")
-
-    for row in rows:
-        game_id = row[0]
+    for game_id in game_ids:
         if game_id in processed_game_pks:
-            print(f"Skipping {game_id}, already processed.")
+            logging.info(f"Skipping {game_id}, already processed.")
             continue
-        print(f"Processing game {game_id}...")
+        logging.info(f"Processing game {game_id}...")
         pbp = load_pbp_from_file(game_id)
         if pbp is None:
-            print(f"{game_id}.json.gz has nothing...")
+            logging.warning(f"{game_id}.json.gz has nothing...")
             continue
-
         for play_event in pbp:
             atbat_index = play_event["about"]["atBatIndex"]
-            runner_data = [
-                runner for runner in play_event["runners"]
-            ]
+            runner_data = [runner for runner in play_event["runners"]]
             insert_pitch_data(cursor, game_id, atbat_index, runner_data)
+
+
+if __name__ == '__main__':
+    logging.basicConfig(level=logging.INFO)
+    conn = sqlite3.connect("mlb.db")
+    cursor = conn.cursor()
+    rows = cursor.execute("SELECT distinct game_pk FROM atbat;").fetchall()
+    logging.info(f"Found unproccessed game pks {len(rows)} game ids")
+    game_ids = [row[0] for row in rows]
+    save_runners(cursor, game_ids)
     conn.close()

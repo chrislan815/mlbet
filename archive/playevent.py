@@ -1,13 +1,7 @@
 import sqlite3
 
-import glom
-from pprint import pprint
 
 import statsapi
-import logging
-
-from utils import print_flatten_schema
-
 
 """ AtBat Data Schema
 (game_pk and about_atBatIndex)
@@ -342,16 +336,12 @@ def insert_pitch_data(cursor, game_pk, about_atBatIndex, pitch):
         data.get('offense_batterPosition_name'),
         data.get('offense_batterPosition_type'),
         data.get('offense_batterPosition_abbreviation'),
-
         data.get('offense_first_id'),
         data.get('offense_first_link'),
-
         data.get('offense_second_id'),
         data.get('offense_second_link'),
-
         data.get('offense_third_id'),
         data.get('offense_third_link'),
-
     )
 
     cursor.execute(sql, values)

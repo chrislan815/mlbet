@@ -1,14 +1,5 @@
 import sqlite3
 
-import glom
-from pprint import pprint
-
-import statsapi
-import logging
-
-from utils import print_flatten_schema
-
-
 import gzip
 import json
 import os
