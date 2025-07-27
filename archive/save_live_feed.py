@@ -16,7 +16,7 @@ ssl_context.check_hostname = False
 ssl_context.verify_mode = ssl.CERT_NONE
 
 
-def fetch_and_save_live_feed_data(game_pk):
+def save_live_feed_data(game_pk):
     filepath = os.path.join(os.path.dirname(__file__), '..', 'live_feeds', f"{game_pk}.json.gz")
     if os.path.exists(filepath):
         logging.info(f"Skipping {filepath}, file already exists.")
@@ -41,7 +41,7 @@ def main():
     schedule = statsapi.schedule()
     final_game_pks = [g["game_id"] for g in schedule if g.get("status") == "Final"]
     for game_pk in final_game_pks:
-        fetch_and_save_live_feed_data(game_pk)
+        save_live_feed_data(game_pk)
 
 
 if __name__ == "__main__":

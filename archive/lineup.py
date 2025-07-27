@@ -85,7 +85,7 @@ def get_lineup(_game_id):
         ]
     return _lineup
 
-def save_lineup_for_game(cursor, game_id):
+def save_lineup(cursor, game_id):
     lineup = get_lineup(game_id)
     if not lineup:
         logging.warning(f"No lineup found for game {game_id}")
@@ -116,4 +116,4 @@ if __name__ == '__main__':
     """).fetchall()
     for row in rows:
         game_id = row[0]
-        save_lineup_for_game(cursor, game_id)
+        save_lineup(cursor, game_id)
