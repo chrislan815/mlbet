@@ -2,6 +2,7 @@ import requests
 import sqlite3
 from datetime import datetime, timedelta
 import time
+import calendar
 
 # Configuration
 
@@ -11,12 +12,8 @@ conn = sqlite3.connect(DB_PATH)
 cursor = conn.cursor()
 
 # Load all venues except 17 and 3313
-cursor.execute("SELECT venue_id, latitude, longitude FROM venue WHERE venue_id in (2395)")
+cursor.execute("SELECT venue_id, latitude, longitude FROM venue")
 venues = cursor.fetchall()
-
-START_DATE = datetime(2015, 1, 1)
-END_DATE = datetime(2020, 11, 11)
-BATCH_DAYS = 90  # Fetch 30 days per batch
 
 cursor.execute("""
 CREATE TABLE IF NOT EXISTS weather (
@@ -50,13 +47,21 @@ CREATE TABLE IF NOT EXISTS venue (
 """)
 conn.commit()
 
-def fetch_and_save(start_date, end_date):
-    url = 'https://archive-api.open-meteo.com/v1/archive'
+def save_weather(date, venue_id):
+    # Get latitude and longitude from venue table
+    cursor.execute("SELECT latitude, longitude FROM venue WHERE venue_id = ?", (venue_id,))
+    result = cursor.fetchone()
+    if not result:
+        print(f"Venue {venue_id} not found in database.")
+        return
+    latitude, longitude = result
+
+    url = 'https://api.open-meteo.com/v1/forecast'
     params = {
-        'latitude': LATITUDE,
-        'longitude': LONGITUDE,
-        'start_date': start_date.strftime('%Y-%m-%d'),
-        'end_date': end_date.strftime('%Y-%m-%d'),
+        'latitude': latitude,
+        'longitude': longitude,
+        'start_date': date,
+        'end_date': date,
         'hourly': ','.join([
             'temperature_2m',
             'relative_humidity_2m',
@@ -76,7 +81,7 @@ def fetch_and_save(start_date, end_date):
         'timezone': 'UTC'
     }
 
-    print(f"Fetching {params['start_date']} to {params['end_date']}")
+    print(f"Fetching {params['start_date']} to {params['end_date']} for venue {venue_id} ({latitude}, {longitude})")
 
     response = requests.get(url, params=params)
     data = response.json()
@@ -92,7 +97,7 @@ def fetch_and_save(start_date, end_date):
     for i in range(len(times)):
         records.append((
             times[i],
-            VENUE_ID,  # place_id placeholder
+            venue_id,
             hourly.get('temperature_2m', [None]*len(times))[i],
             hourly.get('relative_humidity_2m', [None]*len(times))[i],
             hourly.get('dew_point_2m', [None]*len(times))[i],
@@ -119,18 +124,28 @@ def fetch_and_save(start_date, end_date):
     conn.commit()
     print(f"Saved {len(records)} records")
 
-
-for VENUE_ID, LATITUDE, LONGITUDE in venues:
-    print(f"Processing venue {VENUE_ID}")
-    current_end = END_DATE
-    while current_end >= START_DATE:
-        current_start = max(current_end - timedelta(days=BATCH_DAYS - 1), START_DATE)
+def save_weather_for_range(start_date, end_date, venue_id):
+    current_date = start_date
+    while current_date <= end_date:
         try:
-            fetch_and_save(current_start, current_end)
+            save_weather(current_date.strftime('%Y-%m-%d'), venue_id)
         except Exception as e:
-            print("Error:", e)
-        current_end = current_start - timedelta(days=1)
-        time.sleep(5)  # polite delay between requests
+            print(f"Error on {current_date} for venue {venue_id}: {e}")
+        current_date += timedelta(days=1)
 
-conn.close()
-print("Done!")
+def get_month_date_range(year, month):
+    start_date = datetime(year, month, 1)
+    last_day = calendar.monthrange(year, month)[1]
+    end_date = datetime(year, month, last_day)
+    return start_date, end_date
+
+if __name__ == "__main__":
+    year = 2025
+    month = 8
+    start_date, end_date = get_month_date_range(year, month)
+    for VENUE_ID, LATITUDE, LONGITUDE in venues:
+        print(f"Processing venue {VENUE_ID}")
+        save_weather_for_range(start_date, end_date, VENUE_ID)
+        time.sleep(1)  # polite delay between requests
+    conn.close()
+    print("Done!")

@@ -7,6 +7,8 @@ from calendar import monthrange
 
 import statsapi
 
+
+
 def sanitize_sql_value(val):
     if isinstance(val, (dict, list, set, tuple)):
         return str(val)

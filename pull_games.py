@@ -31,6 +31,7 @@ if __name__ == '__main__':
     [save_game_to_db(conn, game) for game in final_games]
     [save_win_probability_data(game_pk) for game_pk in final_game_pks]
     [save_live_feed_data(game_pk) for game_pk in final_game_pks]
+
     [save_lineup(cursor, game_pk) for game_pk in final_game_pks]
     save_runners(cursor, final_game_pks)
     [save_atbat_to_db(conn, game_pk) for game_pk in final_game_pks]
