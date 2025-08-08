@@ -11,8 +11,6 @@ logging.basicConfig(level=logging.DEBUG)  # or INFO, WARNING, ERROR, CRITICAL
 def save_atbat(conn, game_id, pbp: dict):
     cursor = conn.cursor()
     for play in pbp:
-        abi = play.get('about', {}).get('atBatIndex')
-        print(f'saving {game_id}: {abi}')
         row_data = (
             game_id,
             play.get('result', {}).get('type'),

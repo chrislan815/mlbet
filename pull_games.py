@@ -23,7 +23,8 @@ if __name__ == '__main__':
     conn = sqlite3.connect('/Users/chris.lan/Downloads/mlb.db')
     cursor = conn.cursor()
 
-    schedule = statsapi.schedule()
+    start_date = '2025-08-07'
+    schedule = statsapi.schedule(start_date=start_date)
 
     final_games = [g for g in schedule if g.get('status') == 'Final']
     final_game_pks = [g['game_id'] for g in final_games]

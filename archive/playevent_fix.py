@@ -5,6 +5,7 @@ import json
 import os
 
 from dataclasses import dataclass
+import logging
 
 @dataclass
 class RowData:
@@ -81,12 +82,13 @@ def update_hit_data(_cursor, _data_rows: list[RowData]):
 def save_hit_data(cursor, game_ids):
     data_rows: list[RowData] = []
     for game_id in game_ids:
-        print(game_id)
+        logging.info(f"Processing hit data for game {game_id}")
         pbp = load_win_probability_from_file(game_id)
         if pbp is None:
+            logging.warning(f"No data for game {game_id}")
             continue
         for atbat in pbp:
-            for pe in atbat['playEvents']:
+            for pe in atbat.get('playEvents', []):
                 if hit_data := pe.get('hitData'):
                     pitch_number = pe.get('pitchNumber')
                     atbat_index = atbat["about"]["atBatIndex"]
@@ -98,18 +100,15 @@ def save_hit_data(cursor, game_ids):
                             hit_data=flatten_hit_data(hit_data)
                         )
                     )
-        if len(data_rows) > 50000:
-            print(f"update {len(data_rows)} rows")
-            update_hit_data(cursor, data_rows)
-            data_rows = []
     if data_rows:
-        print(f"update {len(data_rows)} rows")
+        logging.info(f"Updating {len(data_rows)} rows for hit data")
         update_hit_data(cursor, data_rows)
 
 
 if __name__ == '__main__':
     conn = sqlite3.connect("mlb-v2.db")
     cursor = conn.cursor()
+
     rows = cursor.execute("""
                           SELECT game_pk
                           FROM play_event

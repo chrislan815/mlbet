@@ -376,7 +376,6 @@ def save_play_events_to_db(cursor, game_id):
             pe for pe in data.get('playEvents', [])
             if pe.get('details', {}).get('call', {}).get('code')
         ]
-        print(f"inserting {len(pes)} play events for {game_id}... atbat {data['about']['atBatIndex']}")
         insert_pitch_data(cursor, game_id, data["about"]["atBatIndex"], pes)
 
 
