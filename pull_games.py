@@ -1,3 +1,5 @@
+import argparse
+import datetime
 import statsapi
 import sqlite3
 
@@ -14,10 +16,16 @@ from archive.weather_data import pull_weather
 
 # Get today's MLB schedule
 if __name__ == '__main__':
-    conn = sqlite3.connect('/Users/chris.lan/Downloads/mlb.db')
+    parser = argparse.ArgumentParser(description='Pull MLB games and save to database.')
+    parser.add_argument('--db', type=str, default='/Users/chris.lan/Downloads/mlb.db', help='Path to SQLite database')
+    parser.add_argument('--start_date', type=str, default=(datetime.date.today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'), help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--skip-weather', action='store_true', default=False, help='Skip pulling weather data')
+    args = parser.parse_args()
+
+    conn = sqlite3.connect(args.db)
     cursor = conn.cursor()
 
-    start_date = '2025-08-07'
+    start_date = args.start_date
     schedule = statsapi.schedule(start_date=start_date)
 
     final_games = [g for g in schedule if g.get('status') == 'Final']
@@ -32,5 +40,5 @@ if __name__ == '__main__':
     [save_atbat_to_db(conn, game_pk) for game_pk in final_game_pks]
     [save_play_events_to_db(cursor, game_pk) for game_pk in final_game_pks]
     save_hit_data(cursor, final_game_pks)
-    pull_weather(cursor, start_date)
-
+    if not not args.skip_weather:
+        pull_weather(cursor, start_date)
