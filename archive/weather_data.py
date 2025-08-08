@@ -136,15 +136,17 @@ def create_venue_table(cursor):
                    """)
 
 def pull_weather(cursor, start_date_str):
+    print("")
+    print("Pulling weather data...")
     today = date.today()
     start_date = datetime.strptime(start_date_str, '%Y-%m-%d')
     year = start_date.year
     month = start_date.month
     end_date = datetime(year, month, calendar.monthrange(year, month)[1])
+    create_venue_table(cursor)
     cursor.execute("SELECT venue_id, latitude, longitude FROM venue")
     venues = cursor.fetchall()
     create_weather_table(cursor)
-    create_venue_table(cursor)
     cursor.connection.commit()
     if (start_date.date() - today).days > 7:
         print(f"Skipping fetch: {start_date.date()} is more than 1 week in the future.")

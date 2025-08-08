@@ -2,13 +2,8 @@ import os
 import json
 import gzip
 import requests
-import sqlite3
 import logging
-import ssl
-import time
 import statsapi
-
-logging.basicConfig(level=logging.INFO)
 
 
 os.makedirs("games", exist_ok=True)
@@ -16,11 +11,6 @@ os.makedirs("games", exist_ok=True)
 # Throttle to 20 requests per second
 RATE_LIMIT = 20
 PERIOD = 1.0
-
-# Create SSL context that disables verification (for debugging ONLY)
-ssl_context = ssl.create_default_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
 
 
 def save_win_probability_data(game_pk):

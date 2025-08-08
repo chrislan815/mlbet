@@ -1,10 +1,3 @@
-# day range
-# pull all games from the day range
-# save to a csv file
-# save live_feeds to folder
-# game, atbat, runner, lineup, weather and play_event
-
-
 import statsapi
 import sqlite3
 
@@ -16,6 +9,7 @@ from archive.playevent_fix import save_hit_data
 from archive.playevent_local import save_play_events_to_db
 from archive.runners import save_runners
 from archive.save_live_feed import save_live_feed_data
+from archive.weather_data import pull_weather
 
 
 # Get today's MLB schedule
@@ -38,4 +32,5 @@ if __name__ == '__main__':
     [save_atbat_to_db(conn, game_pk) for game_pk in final_game_pks]
     [save_play_events_to_db(cursor, game_pk) for game_pk in final_game_pks]
     save_hit_data(cursor, final_game_pks)
+    pull_weather(cursor, start_date)
 

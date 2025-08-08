@@ -25,11 +25,6 @@ def load_win_probability_from_file(game_pk):
         data = json.load(f)
         return data
 
-""" AtBat Data Schema
-(game_pk and about_atBatIndex)
->>> runners Array of Object
->>> playEvents Array of Object
-"""
 
 def flatten_hit_data(_hit_data):
     hit_coords = _hit_data.get('coordinates', {})

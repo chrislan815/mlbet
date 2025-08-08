@@ -3,10 +3,6 @@ import json
 import os
 import sqlite3
 
-# import glom
-# from pprint import pprint
-
-import statsapi
 import logging
 
 
@@ -136,7 +132,6 @@ def save_runners(cursor, game_ids):
 
 
 if __name__ == '__main__':
-    logging.basicConfig(level=logging.INFO)
     conn = sqlite3.connect("mlb.db")
     cursor = conn.cursor()
     rows = cursor.execute("SELECT distinct game_pk FROM atbat;").fetchall()

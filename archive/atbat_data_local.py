@@ -3,11 +3,6 @@ import json
 import os
 import sqlite3
 
-import logging
-
-logging.basicConfig(level=logging.DEBUG)  # or INFO, WARNING, ERROR, CRITICAL
-
-
 def save_atbat(conn, game_id, pbp: dict):
     cursor = conn.cursor()
     for play in pbp:
@@ -90,11 +85,6 @@ def save_atbat_to_db(connection, game_pk):
         data = json.load(f)
     save_atbat(connection, game_pk, data)
 
-
-""" AtBat Data Schema
->>> runners Array of Object => fkey atbat_id + populating the runnerIndex int
->>> playEvents Array of Object => fkey atbat_id
-"""
 if __name__ == '__main__':
     connection = sqlite3.connect("mlb-v2.db")
     rows = connection.cursor().execute("""

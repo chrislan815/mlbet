@@ -3,18 +3,9 @@ import json
 import gzip
 import requests
 import logging
-import ssl
-import time
 import statsapi
 
-logging.basicConfig(level=logging.INFO)
-
 os.makedirs("live_feeds", exist_ok=True)
-
-ssl_context = ssl.create_default_context()
-ssl_context.check_hostname = False
-ssl_context.verify_mode = ssl.CERT_NONE
-
 
 def save_live_feed_data(game_pk):
     filepath = os.path.join(os.path.dirname(__file__), '..', 'live_feeds', f"{game_pk}.json.gz")
