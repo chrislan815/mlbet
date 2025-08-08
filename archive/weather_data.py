@@ -5,13 +5,6 @@ from datetime import date
 import time
 import calendar
 
-# Configuration
-
-# SQLite setup
-DB_PATH = "/Users/chris.lan/Downloads/mlb.db"
-conn = sqlite3.connect(DB_PATH)
-cursor = conn.cursor()
-
 
 def save_weather_for_week(cursor, year, month, day, venue_id):
     # Get latitude and longitude from venue table

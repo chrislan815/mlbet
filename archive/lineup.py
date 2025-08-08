@@ -66,6 +66,7 @@ def get_lineup(_game_id):
     filepath = f"live_feeds/{_game_id}.json.gz"
 
     if not os.path.exists(filepath):
+        print("File does not exist:", filepath)
         return {}
 
     with gzip.open(filepath, "rb") as f:  # Open in binary mode

@@ -1,0 +1,4 @@
+games/
+live_feeds/
+*.db
+__pycache__/

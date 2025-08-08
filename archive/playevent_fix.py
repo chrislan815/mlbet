@@ -16,7 +16,7 @@ class RowData:
     hit_data: dict
 
 def load_win_probability_from_file(game_pk):
-    path = f"Games/{game_pk}.json.gz"
+    path = f"games/{game_pk}.json.gz"
     if not os.path.exists(path):
         print(f"{path} not found.")
         return None
@@ -81,6 +81,7 @@ def save_hit_data(cursor, game_ids):
         pbp = load_win_probability_from_file(game_id)
         if pbp is None:
             logging.warning(f"No data for game {game_id}")
+            print("No data for game", game_id)
             continue
         for atbat in pbp:
             for pe in atbat.get('playEvents', []):

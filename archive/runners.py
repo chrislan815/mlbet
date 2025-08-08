@@ -124,6 +124,7 @@ def save_runners(cursor, game_ids):
         pbp = load_pbp_from_file(game_id)
         if pbp is None:
             logging.warning(f"{game_id}.json.gz has nothing...")
+            print(f"{game_id}.json.gz has nothing...")
             continue
         for play_event in pbp:
             atbat_index = play_event["about"]["atBatIndex"]

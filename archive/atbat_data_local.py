@@ -80,6 +80,10 @@ def save_atbat_to_db(connection, game_pk):
     if not os.path.exists(path):
         print(f"Missing file: {path}")
         return
+    # Ensure the path exists and is a file before opening
+    if not os.path.isfile(path):
+        print(f"Path exists but is not a file: {path}")
+        return
     print(f"Loading {path}")
     with gzip.open(path, "rt", encoding="utf-8") as f:
         data = json.load(f)
