@@ -1,3 +1,4 @@
+import urllib3
 import argparse
 import datetime
 import statsapi
@@ -16,9 +17,12 @@ from archive.weather_data import pull_weather
 
 # Get today's MLB schedule
 if __name__ == '__main__':
+    urllib3.disable_warnings()
+
     parser = argparse.ArgumentParser(description='Pull MLB games and save to database.')
     parser.add_argument('--db', type=str, default='/Users/chris.lan/Downloads/mlb.db', help='Path to SQLite database')
-    parser.add_argument('--start_date', type=str, default=(datetime.date.today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'), help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--start-date', type=str, default=(datetime.date.today() - datetime.timedelta(days=7)).strftime('%Y-%m-%d'), help='Start date (YYYY-MM-DD)')
+    parser.add_argument('--end-date', type=str, default=datetime.date.today().strftime('%Y-%m-%d'), help='End date (YYYY-MM-DD)')
     parser.add_argument('--skip-weather', action='store_true', default=False, help='Skip pulling weather data')
     args = parser.parse_args()
 
@@ -26,9 +30,11 @@ if __name__ == '__main__':
     cursor = conn.cursor()
 
     start_date = args.start_date
-    schedule = statsapi.schedule(start_date=start_date)
+    end_date = args.end_date
+    schedule = statsapi.schedule(start_date=start_date, end_date=end_date)
 
     final_games = [g for g in schedule if g.get('status') == 'Final']
+    _ = [print(g['game_id']) for g in final_games]
     final_game_pks = [g['game_id'] for g in final_games]
 
     [save_game_to_db(conn, game) for game in final_games]
@@ -40,5 +46,7 @@ if __name__ == '__main__':
     [save_atbat_to_db(conn, game_pk) for game_pk in final_game_pks]
     [save_play_events_to_db(cursor, game_pk) for game_pk in final_game_pks]
     save_hit_data(cursor, final_game_pks)
-    if not not args.skip_weather:
+    if not args.skip_weather:
         pull_weather(cursor, start_date)
+
+    conn.commit()
