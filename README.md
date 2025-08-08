@@ -1,9 +1,11 @@
 Steps
 
 1. download docker desktop
+2. In docker Desktop > Settings (gear symbol) > Resources > add your user directory so docker have permission to read from it
 2. https://docs.docker.com/desktop/setup/install/windows-install/
 2. https://git-scm.com/download/win
 3. git clone https://github.com/chrislan815/mlbet/tree/main
+
 run this first
 
 ```shell
