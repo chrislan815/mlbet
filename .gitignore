@@ -6,3 +6,5 @@ games/
 *.sqlite
 *.db
 live_feeds/
+.pybaseball/
+.playwright-mcp/

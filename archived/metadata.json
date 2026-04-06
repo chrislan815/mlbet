@@ -1,0 +1,8 @@
+{
+  "title": "MLB Pitch Analytics",
+  "plugins": {
+    "datasette-write": {
+      "allow": true
+    }
+  }
+}
