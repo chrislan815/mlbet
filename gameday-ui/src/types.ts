@@ -130,3 +130,55 @@ export interface OddsData {
   markets: Market[]
   updated_at?: string
 }
+
+export interface Position {
+  asset: string | null
+  condition_id: string | null
+  title: string
+  icon: string | null
+  event_slug: string | null
+  outcome: string
+  size: number
+  avg_price: number
+  cur_price: number
+  initial_value: number
+  current_value: number
+  cash_pnl: number
+  percent_pnl: number
+  realized_pnl: number
+  is_live: boolean
+}
+
+export interface Portfolio {
+  available: boolean
+  loading?: boolean
+  wallet?: string
+  username?: string
+  positions: Position[]
+  total_value: number
+  total_cost: number
+  total_pnl: number
+  percent_pnl: number
+  total_realized: number
+  position_count: number
+  updated_at?: string
+}
+
+export interface Activity {
+  proxyWallet: string
+  timestamp: number
+  conditionId: string
+  type: string
+  size: number
+  usdcSize: number
+  transactionHash: string
+  price: number
+  asset: string
+  side: "BUY" | "SELL"
+  outcomeIndex: number
+  title: string
+  slug: string
+  icon: string
+  eventSlug: string
+  outcome: string
+}

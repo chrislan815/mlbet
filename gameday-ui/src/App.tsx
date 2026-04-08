@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Routes, Route, Link, useParams } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel } from "./types"
+import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel, Portfolio, Position, Activity } from "./types"
 
 const PITCH_COLORS: Record<string, string> = {
   FF: "#ef4444", SI: "#f97316", FC: "#eab308", SL: "#facc15",
@@ -1095,12 +1095,261 @@ function GamePage() {
   )
 }
 
+// ── Portfolio Page ─────────────────────────────────
+
+function formatUsd(n: number): string {
+  const abs = Math.abs(n)
+  const sign = n < 0 ? "-" : ""
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
+  if (abs >= 10_000) return `${sign}$${abs.toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+  return `${sign}$${abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
+}
+
+function formatPct(n: number): string {
+  const sign = n >= 0 ? "+" : ""
+  return `${sign}${n.toFixed(2)}%`
+}
+
+function formatRelativeTime(unixSeconds: number): string {
+  const diff = Date.now() / 1000 - unixSeconds
+  if (diff < 60) return `${Math.floor(diff)}s ago`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  return `${Math.floor(diff / 86400)}d ago`
+}
+
+function PortfolioSummary({ p }: { p: Portfolio }) {
+  const pnlColor = p.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"
+  return (
+    <Card>
+      <CardContent className="p-6">
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+          <div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Portfolio Value</div>
+            <div className="text-3xl font-black tabular-nums mt-1">{formatUsd(p.total_value)}</div>
+            <div className="text-xs text-muted-foreground mt-1 tabular-nums">
+              {p.position_count} position{p.position_count === 1 ? "" : "s"}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Unrealized P/L</div>
+            <div className={`text-3xl font-black tabular-nums mt-1 ${pnlColor}`}>
+              {formatUsd(p.total_pnl)}
+            </div>
+            <div className={`text-xs mt-1 tabular-nums ${pnlColor}`}>
+              {formatPct(p.percent_pnl)}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Cost Basis</div>
+            <div className="text-3xl font-black tabular-nums mt-1">{formatUsd(p.total_cost)}</div>
+            <div className="text-xs text-muted-foreground mt-1">Entry amount</div>
+          </div>
+          <div>
+            <div className="text-xs text-muted-foreground uppercase tracking-wider">Realized P/L</div>
+            <div className={`text-3xl font-black tabular-nums mt-1 ${p.total_realized >= 0 ? "text-emerald-400" : "text-red-400"}`}>
+              {formatUsd(p.total_realized)}
+            </div>
+            <div className="text-xs text-muted-foreground mt-1">Locked in</div>
+          </div>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+function PositionsTable({ positions }: { positions: Position[] }) {
+  if (positions.length === 0) {
+    return <div className="text-center py-12 text-muted-foreground text-sm">No open positions</div>
+  }
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 bg-card z-10">
+          <tr className="border-b border-border">
+            <th className="text-left px-3 py-2 text-xs text-muted-foreground font-semibold">Market</th>
+            <th className="text-left px-3 py-2 text-xs text-muted-foreground font-semibold">Side</th>
+            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Shares</th>
+            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Avg</th>
+            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Current</th>
+            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Value</th>
+            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">P/L</th>
+          </tr>
+        </thead>
+        <tbody>
+          {positions.map((pos) => {
+            const pnlColor = pos.cash_pnl >= 0 ? "text-emerald-400" : "text-red-400"
+            const href = pos.event_slug ? `https://polymarket.com/event/${pos.event_slug}` : undefined
+            return (
+              <tr key={pos.asset ?? pos.condition_id ?? pos.title} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
+                <td className="px-3 py-2.5 max-w-[340px]">
+                  <div className="flex items-center gap-2 min-w-0">
+                    {pos.icon && <img src={pos.icon} alt="" className="w-6 h-6 rounded object-cover shrink-0" />}
+                    {href ? (
+                      <a href={href} target="_blank" rel="noreferrer" className="min-w-0 truncate block font-medium hover:text-primary transition-colors">
+                        {pos.title}
+                      </a>
+                    ) : (
+                      <span className="min-w-0 truncate font-medium">{pos.title}</span>
+                    )}
+                  </div>
+                </td>
+                <td className="px-3 py-2.5">
+                  <span className="inline-flex items-center gap-1 text-xs">
+                    <span className="px-1.5 py-0.5 rounded bg-secondary text-foreground/80 font-semibold">
+                      {pos.outcome}
+                    </span>
+                    {pos.is_live && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Live price" />}
+                  </span>
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{pos.size.toFixed(2)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{formatPrice(pos.avg_price)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(pos.cur_price)}</td>
+                <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{formatUsd(pos.current_value)}</td>
+                <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${pnlColor}`}>
+                  <div>{formatUsd(pos.cash_pnl)}</div>
+                  <div className="text-[10px] font-normal">{formatPct(pos.percent_pnl)}</div>
+                </td>
+              </tr>
+            )
+          })}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function ActivityFeed({ items }: { items: Activity[] }) {
+  if (items.length === 0) {
+    return <div className="text-center py-8 text-muted-foreground text-sm">No recent activity</div>
+  }
+  return (
+    <div className="max-h-[600px] overflow-y-auto">
+      {items.map((a, i) => {
+        const sideColor = a.side === "BUY" ? "text-emerald-400" : "text-red-400"
+        const href = a.eventSlug ? `https://polymarket.com/event/${a.eventSlug}` : undefined
+        return (
+          <div key={`${a.transactionHash}-${a.conditionId ?? a.asset ?? i}`} className="px-4 py-3 border-b border-border/50 hover:bg-secondary/20 transition-colors">
+            <div className="flex items-center justify-between gap-3 mb-1">
+              <div className="flex items-center gap-2 min-w-0">
+                {a.icon && <img src={a.icon} alt="" className="w-5 h-5 rounded object-cover shrink-0" />}
+                {href ? (
+                  <a href={href} target="_blank" rel="noreferrer" className="text-sm font-medium truncate hover:text-primary transition-colors">
+                    {a.title}
+                  </a>
+                ) : (
+                  <span className="text-sm font-medium truncate">{a.title}</span>
+                )}
+              </div>
+              <span className="text-xs text-muted-foreground shrink-0 tabular-nums">{formatRelativeTime(a.timestamp)}</span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className={`font-bold uppercase ${sideColor}`}>{a.side}</span>
+              <span className="px-1.5 py-0.5 rounded bg-secondary text-foreground/70">{a.outcome}</span>
+              <span className="text-muted-foreground tabular-nums">
+                {a.size.toFixed(2)} @ {formatPrice(a.price)}
+              </span>
+              <span className="text-muted-foreground tabular-nums ml-auto">{formatUsd(a.usdcSize)}</span>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
+function PortfolioPage() {
+  const { username } = useParams()
+  const user = username ?? "whycantilose"
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
+  const [activity, setActivity] = useState<Activity[]>([])
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`/api/portfolio/${user}`, { signal: controller.signal })
+      .then(r => r.json()).then(setPortfolio).catch(() => {})
+    const es = new EventSource(`/api/portfolio/${user}/stream`)
+    es.onmessage = (e) => setPortfolio(JSON.parse(e.data))
+    return () => { controller.abort(); es.close() }
+  }, [user])
+
+  useEffect(() => {
+    let cancelled = false
+    const load = () => {
+      fetch(`/api/portfolio/${user}/activity`)
+        .then(r => r.json())
+        .then(d => { if (!cancelled) setActivity(d.activity ?? []) })
+        .catch(() => {})
+    }
+    load()
+    const id = setInterval(load, 15000)
+    return () => { cancelled = true; clearInterval(id) }
+  }, [user])
+
+  if (!portfolio) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-6xl mx-auto p-4">
+          <Link to="/" className="text-sm text-muted-foreground hover:text-foreground mb-4 inline-block">&larr; All Games</Link>
+          <div className="text-center py-20 text-muted-foreground text-lg">Loading portfolio...</div>
+        </div>
+      </div>
+    )
+  }
+
+  if (!portfolio.available) {
+    return (
+      <div className="min-h-screen bg-background">
+        <div className="max-w-6xl mx-auto p-4">
+          <Link to="/" className="text-sm text-muted-foreground hover:text-foreground mb-4 inline-block">&larr; All Games</Link>
+          <div className="text-center py-20 text-muted-foreground text-lg">
+            {portfolio.loading ? "Loading..." : `No portfolio for @${user}`}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <div className="max-w-6xl mx-auto p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">&larr; All Games</Link>
+          <div className="text-right">
+            <div className="text-sm font-semibold">@{portfolio.username ?? user}</div>
+            {portfolio.wallet && (
+              <div className="text-[10px] text-muted-foreground font-mono">
+                {portfolio.wallet.slice(0, 6)}…{portfolio.wallet.slice(-4)}
+              </div>
+            )}
+          </div>
+        </div>
+
+        <PortfolioSummary p={portfolio} />
+
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
+          <Card className="lg:col-span-2">
+            <CardHeader><CardTitle>Positions</CardTitle></CardHeader>
+            <CardContent className="p-0"><PositionsTable positions={portfolio.positions} /></CardContent>
+          </Card>
+          <Card>
+            <CardHeader><CardTitle>Activity</CardTitle></CardHeader>
+            <CardContent className="p-0"><ActivityFeed items={activity} /></CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 // ── App (Router) ──────────────────────────────────
 export default function App() {
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/game/:slug" element={<GamePage />} />
+      <Route path="/portfolio/:username" element={<PortfolioPage />} />
+      <Route path="/portfolio" element={<PortfolioPage />} />
     </Routes>
   )
 }

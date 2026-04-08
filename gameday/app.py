@@ -34,10 +34,18 @@ SSE_INTERVAL = 0.1     # seconds between SSE push checks
 GAMMA_API = "https://gamma-api.polymarket.com"
 CLOB_API = "https://clob.polymarket.com"
 CLOB_WSS = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
+POLY_DATA_API = "https://data-api.polymarket.com"
 POLYMARKET_POLL = 30.0   # metadata only (market list, volume, questions) — order books come via WS
 POLYMARKET_WS_PING = 10.0
 MLB_TAG_ID = 100381
 ODDS_IDLE_TIMEOUT = 30.0
+PORTFOLIO_POLL = 10.0            # positions/value refresh from data-api (activity every other tick)
+PORTFOLIO_IDLE_TIMEOUT = 30.0
+
+# Username → proxy wallet. Extend as more accounts are added.
+PORTFOLIO_WALLETS: dict[str, str] = {
+    "whycantilose": "0x6498f9eab8018b2d61fe0186bee145f53e4d8910",
+}
 
 TEAM_ABBREV: dict[str, str] = {
     "Arizona Diamondbacks": "ari", "Atlanta Braves": "atl", "Baltimore Orioles": "bal",
@@ -85,6 +93,16 @@ _live_books: dict[str, dict] = {}
 _ws_tasks: dict[int, asyncio.Task] = {}              # game_pk -> websocket pump task
 _ws_tokens: dict[int, list[str]] = {}                # game_pk -> token_ids subscribed
 _odds_update_events: dict[int, asyncio.Event] = {}   # game_pk -> SSE wake signal
+
+# ── Portfolio cache (Polymarket account positions/activity/value) ───────
+
+_portfolio_cache: dict[str, dict] = {}               # wallet -> positions snapshot from data-api
+_portfolio_activity_cache: dict[str, list] = {}      # wallet -> recent trades
+_portfolio_last_request: dict[str, float] = {}       # wallet -> last SSE activity (idle tracking)
+_portfolio_tasks: dict[str, asyncio.Task] = {}       # wallet -> metadata poll task
+_portfolio_ws_tasks: dict[str, asyncio.Task] = {}    # wallet -> WS pump task
+_portfolio_ws_tokens: dict[str, list[str]] = {}      # wallet -> token_ids currently subscribed
+_portfolio_update_events: dict[str, asyncio.Event] = {}  # wallet -> SSE wake signal
 
 
 # ── Lifecycle ────────────────────────────────────────────────────────────
@@ -569,14 +587,12 @@ def _apply_ws_event(ev: dict) -> set[str]:
     return touched
 
 
-async def _ws_market_loop(game_pk: int, token_ids: list[str]) -> None:
-    """Maintain a live Polymarket WS subscription for this game's tokens.
+async def _ws_market_loop(token_ids: list[str], update_event: asyncio.Event) -> None:
+    """Maintain a live Polymarket WS subscription for a given set of tokens.
 
-    Applies book snapshots and price_change deltas into _live_books and sets the
-    per-game update Event so any SSE streams wake up and push a new payload.
+    Applies book snapshots and price_change deltas into _live_books and sets
+    update_event so any SSE streams wake up and push a new payload.
     """
-    update_event = _odds_update_events.setdefault(game_pk, asyncio.Event())
-
     async for conn in websockets.connect(CLOB_WSS, ping_interval=None, open_timeout=15, close_timeout=5):
         try:
             # Subscribe (note the plural `assets_ids` — this is the correct field name).
@@ -638,7 +654,8 @@ async def _ensure_ws_stream(game_pk: int, markets: list[dict]) -> None:
 
     await _prime_live_books(desired)
     _ws_tokens[game_pk] = desired
-    _ws_tasks[game_pk] = asyncio.create_task(_ws_market_loop(game_pk, desired))
+    update_event = _odds_update_events.setdefault(game_pk, asyncio.Event())
+    _ws_tasks[game_pk] = asyncio.create_task(_ws_market_loop(desired, update_event))
 
 
 async def _poll_odds_loop(game_pk: int):
@@ -702,6 +719,202 @@ async def _poll_odds_loop(game_pk: int):
     _ws_tokens.pop(game_pk, None)
     _odds_update_events.pop(game_pk, None)
     _odds_tasks.pop(game_pk, None)
+
+
+# ── Portfolio helpers ───────────────────────────────────────────────────
+
+def _resolve_wallet(username: str) -> str | None:
+    """Map a username (or raw 0x address) to a proxy wallet address."""
+    u = username.lstrip("@").lower()
+    if u.startswith("0x") and len(u) == 42:
+        return u
+    return PORTFOLIO_WALLETS.get(u)
+
+
+async def _fetch_positions(wallet: str) -> list[dict]:
+    resp = await http_client.get(
+        f"{POLY_DATA_API}/positions",
+        params={"user": wallet, "sizeThreshold": "0.1", "limit": "200"})
+    resp.raise_for_status()
+    data = resp.json()
+    return data if isinstance(data, list) else []
+
+
+async def _fetch_activity(wallet: str, limit: int = 50) -> list[dict]:
+    try:
+        resp = await http_client.get(
+            f"{POLY_DATA_API}/activity",
+            params={"user": wallet, "limit": str(limit)})
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
+def _live_mid_price(token_id: str | None) -> float | None:
+    """Return the best mid-price from _live_books for a token, or None if no book."""
+    if not token_id:
+        return None
+    lb = _live_books.get(token_id)
+    if not lb:
+        return None
+    bids = [p for p, s in lb["bids"].items() if s > 0]
+    asks = [p for p, s in lb["asks"].items() if s > 0]
+    best_bid = max(bids) if bids else None
+    best_ask = min(asks) if asks else None
+    if best_bid is not None and best_ask is not None:
+        return (best_bid + best_ask) / 2
+    if best_bid is not None:
+        return best_bid
+    if best_ask is not None:
+        return best_ask
+    ltp = lb.get("last_trade_price")
+    return float(ltp) if ltp else None
+
+
+def _materialize_portfolio(wallet: str) -> dict:
+    """Build portfolio snapshot: positions overlaid with live prices + totals."""
+    cached = _portfolio_cache.get(wallet)
+    if not cached:
+        return {"available": False, "loading": True, "positions": [],
+                "total_value": 0, "total_cost": 0, "total_pnl": 0, "percent_pnl": 0}
+
+    positions_out: list[dict] = []
+    total_value = 0.0
+    total_cost = 0.0
+    total_realized = 0.0
+
+    for p in cached.get("positions", []):
+        token_id = p.get("asset")
+        size = float(p.get("size", 0) or 0)
+        avg_price = float(p.get("avgPrice", 0) or 0)
+        initial_value = float(p.get("initialValue", 0) or 0)
+        api_cur_price = float(p.get("curPrice", 0) or 0)
+        api_current_value = float(p.get("currentValue", 0) or 0)
+        realized = float(p.get("realizedPnl", 0) or 0)
+
+        live = _live_mid_price(token_id)
+        cur_price = live if live is not None else api_cur_price
+        current_value = size * cur_price if live is not None else api_current_value
+        cash_pnl = current_value - initial_value
+        percent_pnl = (cash_pnl / initial_value * 100) if initial_value > 0 else 0.0
+
+        total_value += current_value
+        total_cost += initial_value
+        total_realized += realized
+
+        positions_out.append({
+            "asset": token_id,
+            "condition_id": p.get("conditionId"),
+            "title": p.get("title"),
+            "icon": p.get("icon"),
+            "event_slug": p.get("eventSlug"),
+            "outcome": p.get("outcome"),
+            "size": size,
+            "avg_price": avg_price,
+            "cur_price": cur_price,
+            "initial_value": initial_value,
+            "current_value": current_value,
+            "cash_pnl": cash_pnl,
+            "percent_pnl": percent_pnl,
+            "realized_pnl": realized,
+            "is_live": live is not None,
+        })
+
+    positions_out.sort(key=lambda x: x["current_value"], reverse=True)
+    total_pnl = total_value - total_cost
+    percent_pnl = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
+
+    return {
+        "available": True,
+        "wallet": wallet,
+        "username": cached.get("username"),
+        "positions": positions_out,
+        "total_value": total_value,
+        "total_cost": total_cost,
+        "total_pnl": total_pnl,
+        "percent_pnl": percent_pnl,
+        "total_realized": total_realized,
+        "position_count": len(positions_out),
+        "updated_at": cached.get("updated_at"),
+    }
+
+
+async def _ensure_portfolio_ws(wallet: str, token_ids: list[str]) -> None:
+    """Prime books via REST and start the WS pump if not already running for this wallet."""
+    if not token_ids:
+        return
+    desired = sorted(set(token_ids))
+    existing = _portfolio_ws_tokens.get(wallet, [])
+    task = _portfolio_ws_tasks.get(wallet)
+    if task and not task.done() and existing == desired:
+        return
+
+    if task and not task.done():
+        task.cancel()
+        try:
+            await task
+        except (asyncio.CancelledError, Exception):
+            pass
+
+    # Only prime tokens we don't already have — game-pk WS streams may
+    # have already seeded some of these.
+    missing = [t for t in desired if t not in _live_books]
+    if missing:
+        await _prime_live_books(missing)
+    _portfolio_ws_tokens[wallet] = desired
+    update_event = _portfolio_update_events.setdefault(wallet, asyncio.Event())
+    _portfolio_ws_tasks[wallet] = asyncio.create_task(_ws_market_loop(desired, update_event))
+
+
+async def _poll_portfolio_loop(wallet: str, username: str):
+    """Refresh positions + activity from data-api, keep the WS stream in sync.
+    Stops when idle (no SSE/REST traffic for PORTFOLIO_IDLE_TIMEOUT)."""
+    tick = 0
+    while True:
+        now = asyncio.get_event_loop().time()
+        last_req = _portfolio_last_request.get(wallet, 0)
+        if now - last_req > PORTFOLIO_IDLE_TIMEOUT:
+            break
+
+        try:
+            # Activity refreshes every other tick (~20s) and rides the same gather.
+            if tick % 2 == 0:
+                positions, activity = await asyncio.gather(
+                    _fetch_positions(wallet), _fetch_activity(wallet, 50))
+                _portfolio_activity_cache[wallet] = activity
+            else:
+                positions = await _fetch_positions(wallet)
+
+            _portfolio_cache[wallet] = {
+                "username": username,
+                "positions": positions,
+                "updated_at": datetime.utcnow().isoformat(),
+            }
+            token_ids = [p.get("asset") for p in positions if p.get("asset")]
+            await _ensure_portfolio_ws(wallet, token_ids)
+
+            ev = _portfolio_update_events.get(wallet)
+            if ev:
+                ev.set()
+        except Exception:
+            if wallet not in _portfolio_cache:
+                _portfolio_cache[wallet] = {"username": username, "positions": [],
+                                            "updated_at": None}
+
+        tick += 1
+        await asyncio.sleep(PORTFOLIO_POLL)
+
+    ws_task = _portfolio_ws_tasks.pop(wallet, None)
+    if ws_task and not ws_task.done():
+        ws_task.cancel()
+    _portfolio_ws_tokens.pop(wallet, None)
+    _portfolio_update_events.pop(wallet, None)
+    _portfolio_cache.pop(wallet, None)
+    _portfolio_activity_cache.pop(wallet, None)
+    _portfolio_last_request.pop(wallet, None)
+    _portfolio_tasks.pop(wallet, None)
 
 
 # ── Routes ───────────────────────────────────────────────────────────────
@@ -866,6 +1079,66 @@ async def game_by_slug(slug: str):
     if not row:
         return JSONResponse({"error": "Game not found"}, status_code=404)
     return {"game_pk": row["game_pk"], "slug": slug}
+
+
+@app.get("/api/portfolio/{username}")
+async def portfolio_snapshot(username: str):
+    wallet = _resolve_wallet(username)
+    if not wallet:
+        return JSONResponse({"error": "Unknown user"}, status_code=404)
+    _portfolio_last_request[wallet] = asyncio.get_event_loop().time()
+    if wallet not in _portfolio_tasks or _portfolio_tasks[wallet].done():
+        _portfolio_tasks[wallet] = asyncio.create_task(_poll_portfolio_loop(wallet, username.lstrip("@")))
+    return _materialize_portfolio(wallet)
+
+
+@app.get("/api/portfolio/{username}/stream")
+async def portfolio_stream(username: str, request: Request):
+    """SSE stream of portfolio state. Pushes on every relevant Polymarket WS event."""
+    wallet = _resolve_wallet(username)
+    if not wallet:
+        return JSONResponse({"error": "Unknown user"}, status_code=404)
+    if wallet not in _portfolio_tasks or _portfolio_tasks[wallet].done():
+        _portfolio_tasks[wallet] = asyncio.create_task(_poll_portfolio_loop(wallet, username.lstrip("@")))
+    update_event = _portfolio_update_events.setdefault(wallet, asyncio.Event())
+
+    async def generate():
+        last_hash = None
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                _portfolio_last_request[wallet] = asyncio.get_event_loop().time()
+                payload = _materialize_portfolio(wallet)
+                data = json.dumps(payload, default=str)
+                h = hashlib.md5(data.encode()).hexdigest()
+                if h != last_hash:
+                    last_hash = h
+                    yield f"data: {data}\n\n"
+                try:
+                    await asyncio.wait_for(update_event.wait(), timeout=1.0)
+                    update_event.clear()
+                except asyncio.TimeoutError:
+                    pass
+        except asyncio.CancelledError:
+            raise
+
+    return StreamingResponse(
+        generate(), media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/portfolio/{username}/activity")
+async def portfolio_activity(username: str, limit: int = Query(default=50, ge=1, le=200)):
+    wallet = _resolve_wallet(username)
+    if not wallet:
+        return JSONResponse({"error": "Unknown user"}, status_code=404)
+    _portfolio_last_request[wallet] = asyncio.get_event_loop().time()
+    activity = _portfolio_activity_cache.get(wallet)
+    if activity is None:
+        activity = await _fetch_activity(wallet, limit)
+        _portfolio_activity_cache[wallet] = activity
+    return {"wallet": wallet, "activity": activity[:limit]}
 
 
 @app.get("/{path:path}")
