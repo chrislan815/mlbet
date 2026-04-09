@@ -848,8 +848,12 @@ def _compute_position(raw: dict) -> dict:
     initial_value = float(raw.get("initialValue", 0) or 0)
     api_cur_price = float(raw.get("curPrice", 0) or 0)
     api_current_value = float(raw.get("currentValue", 0) or 0)
+    redeemable = bool(raw.get("redeemable"))
 
-    live = _live_mid_price(token_id)
+    # For redeemable (already-resolved) markets, skip the live mid overlay —
+    # the WS order book can stay stuck at the pre-resolution price and mask the
+    # API's authoritative curPrice of 0 (loser) or 1 (winner).
+    live = None if redeemable else _live_mid_price(token_id)
     cur_price = live if live is not None else api_cur_price
     current_value = size * cur_price if live is not None else api_current_value
 
@@ -872,7 +876,7 @@ def _compute_position(raw: dict) -> dict:
         "realized_pnl": float(raw.get("realizedPnl", 0) or 0),
         "is_live": live is not None,
         "_api_current_value": api_current_value,
-        "_is_resolved": cur_price < RESOLVED_PRICE_THRESHOLD,
+        "_is_resolved": redeemable or cur_price < RESOLVED_PRICE_THRESHOLD,
     }
 
 
