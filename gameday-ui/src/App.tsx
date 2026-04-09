@@ -933,7 +933,20 @@ function HomePage() {
     <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto p-4">
         {/* Header */}
-        <h1 className="text-2xl font-bold mb-6">MLB Gameday</h1>
+        <div className="flex items-center justify-between mb-6">
+          <h1 className="text-2xl font-bold">MLB Gameday</h1>
+          <Link
+            to="/portfolio/whycantilose"
+            className="group inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border/60 bg-card/40 hover:bg-card hover:border-border transition-colors"
+          >
+            <span className="relative flex w-1.5 h-1.5">
+              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
+              <span className="relative rounded-full w-1.5 h-1.5 bg-emerald-400" />
+            </span>
+            <span className="text-xs font-semibold">Portfolio</span>
+            <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors">→</span>
+          </Link>
+        </div>
 
         {/* Date navigation */}
         <div className="flex items-center justify-between mb-6">
@@ -1307,6 +1320,12 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
                 </>
               )}
             </div>
+            {(p.resolved_count ?? 0) > 0 && (
+              <div className="text-[10px] text-muted-foreground/70 mt-2 tabular-nums">
+                Excluded {p.resolved_count} settled
+                {p.resolved_losses ? <> · sunk {formatUsd(p.resolved_losses)}</> : null}
+              </div>
+            )}
           </div>
         </div>
       </div>

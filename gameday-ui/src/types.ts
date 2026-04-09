@@ -160,6 +160,8 @@ export interface Portfolio {
   total_pnl: number
   percent_pnl: number
   total_realized: number
+  resolved_losses?: number
+  resolved_count?: number
   position_count: number
   updated_at?: string
 }

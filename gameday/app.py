@@ -773,8 +773,18 @@ def _live_mid_price(token_id: str | None) -> float | None:
     return float(ltp) if ltp else None
 
 
+# Positions with cur_price at or below this are treated as resolved-to-zero
+# losing bets. Polymarket's own profile page excludes them from unrealized P/L.
+RESOLVED_PRICE_THRESHOLD = 0.01
+
+
 def _materialize_portfolio(wallet: str) -> dict:
-    """Build portfolio snapshot: positions overlaid with live prices + totals."""
+    """Build portfolio snapshot: open positions overlaid with live prices + totals.
+
+    Resolved-to-zero losing positions are excluded from open positions and from
+    unrealized totals (matching Polymarket's profile UI). Their sunk cost is
+    surfaced separately via `resolved_losses` for transparency.
+    """
     cached = _portfolio_cache.get(wallet)
     if not cached:
         return {"available": False, "loading": True, "positions": [],
@@ -784,6 +794,8 @@ def _materialize_portfolio(wallet: str) -> dict:
     total_value = 0.0
     total_cost = 0.0
     total_realized = 0.0
+    resolved_losses = 0.0
+    resolved_count = 0
 
     for p in cached.get("positions", []):
         token_id = p.get("asset")
@@ -797,12 +809,21 @@ def _materialize_portfolio(wallet: str) -> dict:
         live = _live_mid_price(token_id)
         cur_price = live if live is not None else api_cur_price
         current_value = size * cur_price if live is not None else api_current_value
+
+        # Always include realized P/L — that's accurate historical data.
+        total_realized += realized
+
+        # Resolved-to-zero: exclude from open positions + unrealized totals.
+        if cur_price < RESOLVED_PRICE_THRESHOLD:
+            resolved_losses += initial_value
+            resolved_count += 1
+            continue
+
         cash_pnl = current_value - initial_value
         percent_pnl = (cash_pnl / initial_value * 100) if initial_value > 0 else 0.0
 
         total_value += current_value
         total_cost += initial_value
-        total_realized += realized
 
         positions_out.append({
             "asset": token_id,
@@ -836,6 +857,8 @@ def _materialize_portfolio(wallet: str) -> dict:
         "total_pnl": total_pnl,
         "percent_pnl": percent_pnl,
         "total_realized": total_realized,
+        "resolved_losses": resolved_losses,
+        "resolved_count": resolved_count,
         "position_count": len(positions_out),
         "updated_at": cached.get("updated_at"),
     }
