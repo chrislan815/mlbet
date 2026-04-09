@@ -35,6 +35,7 @@ GAMMA_API = "https://gamma-api.polymarket.com"
 CLOB_API = "https://clob.polymarket.com"
 CLOB_WSS = "wss://ws-subscriptions-clob.polymarket.com/ws/market"
 POLY_DATA_API = "https://data-api.polymarket.com"
+POLY_PNL_API = "https://user-pnl-api.polymarket.com"
 POLYMARKET_POLL = 30.0   # metadata only (market list, volume, questions) — order books come via WS
 POLYMARKET_WS_PING = 10.0
 MLB_TAG_ID = 100381
@@ -98,6 +99,7 @@ _odds_update_events: dict[int, asyncio.Event] = {}   # game_pk -> SSE wake signa
 
 _portfolio_cache: dict[str, dict] = {}               # wallet -> positions snapshot from data-api
 _portfolio_activity_cache: dict[str, list] = {}      # wallet -> recent trades
+_portfolio_pnl_cache: dict[str, list[dict]] = {}     # wallet -> lifetime pnl time-series
 _portfolio_last_request: dict[str, float] = {}       # wallet -> last SSE activity (idle tracking)
 _portfolio_tasks: dict[str, asyncio.Task] = {}       # wallet -> metadata poll task
 _portfolio_ws_tasks: dict[str, asyncio.Task] = {}    # wallet -> WS pump task
@@ -752,6 +754,23 @@ async def _fetch_activity(wallet: str, limit: int = 50) -> list[dict]:
         return []
 
 
+async def _fetch_user_pnl(wallet: str, interval: str = "all") -> list[dict]:
+    """Fetch Polymarket's lifetime P/L time series [{t, p}, ...].
+
+    Returns one point per hour (their fidelity). The final point is the
+    current net all-time P/L (matches the big number on their profile page).
+    """
+    try:
+        resp = await http_client.get(
+            f"{POLY_PNL_API}/user-pnl",
+            params={"user_address": wallet, "interval": interval})
+        resp.raise_for_status()
+        data = resp.json()
+        return data if isinstance(data, list) else []
+    except Exception:
+        return []
+
+
 def _live_mid_price(token_id: str | None) -> float | None:
     """Return the best mid-price from _live_books for a token, or None if no book."""
     if not token_id:
@@ -847,6 +866,20 @@ def _materialize_portfolio(wallet: str) -> dict:
     total_pnl = total_value - total_cost
     percent_pnl = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
 
+    # Lifetime P/L (all-time net from Polymarket): the last point of the series
+    # and a down-sampled version of the series for the frontend sparkline.
+    pnl_series_raw = _portfolio_pnl_cache.get(wallet, [])
+    lifetime_pnl = float(pnl_series_raw[-1].get("p", 0)) if pnl_series_raw else 0.0
+    # Down-sample to ~120 points max so the sparkline isn't oversized on the wire.
+    if len(pnl_series_raw) > 120:
+        step = len(pnl_series_raw) // 120 or 1
+        pnl_series = pnl_series_raw[::step]
+        # Always keep the last point so the tip of the chart matches lifetime_pnl.
+        if pnl_series[-1] is not pnl_series_raw[-1]:
+            pnl_series = [*pnl_series, pnl_series_raw[-1]]
+    else:
+        pnl_series = pnl_series_raw
+
     return {
         "available": True,
         "wallet": wallet,
@@ -859,6 +892,8 @@ def _materialize_portfolio(wallet: str) -> dict:
         "total_realized": total_realized,
         "resolved_losses": resolved_losses,
         "resolved_count": resolved_count,
+        "lifetime_pnl": lifetime_pnl,
+        "pnl_series": pnl_series,
         "position_count": len(positions_out),
         "updated_at": cached.get("updated_at"),
     }
@@ -902,11 +937,16 @@ async def _poll_portfolio_loop(wallet: str, username: str):
             break
 
         try:
-            # Activity refreshes every other tick (~20s) and rides the same gather.
+            # Activity + lifetime P/L refresh every other tick (~20s) and ride
+            # the same gather as positions to minimize round-trips.
             if tick % 2 == 0:
-                positions, activity = await asyncio.gather(
-                    _fetch_positions(wallet), _fetch_activity(wallet, 50))
+                positions, activity, pnl_series = await asyncio.gather(
+                    _fetch_positions(wallet),
+                    _fetch_activity(wallet, 50),
+                    _fetch_user_pnl(wallet))
                 _portfolio_activity_cache[wallet] = activity
+                if pnl_series:
+                    _portfolio_pnl_cache[wallet] = pnl_series
             else:
                 positions = await _fetch_positions(wallet)
 
@@ -936,6 +976,7 @@ async def _poll_portfolio_loop(wallet: str, username: str):
     _portfolio_update_events.pop(wallet, None)
     _portfolio_cache.pop(wallet, None)
     _portfolio_activity_cache.pop(wallet, None)
+    _portfolio_pnl_cache.pop(wallet, None)
     _portfolio_last_request.pop(wallet, None)
     _portfolio_tasks.pop(wallet, None)
 

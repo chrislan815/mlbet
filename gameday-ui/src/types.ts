@@ -149,6 +149,11 @@ export interface Position {
   is_live: boolean
 }
 
+export interface PnlPoint {
+  t: number   // unix seconds
+  p: number   // cumulative lifetime P/L at that timestamp (USDC)
+}
+
 export interface Portfolio {
   available: boolean
   loading?: boolean
@@ -162,6 +167,8 @@ export interface Portfolio {
   total_realized: number
   resolved_losses?: number
   resolved_count?: number
+  lifetime_pnl?: number
+  pnl_series?: PnlPoint[]
   position_count: number
   updated_at?: string
 }

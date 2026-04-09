@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Routes, Route, Link, useParams } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel, Portfolio, Position, Activity } from "./types"
+import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel, Portfolio, Position, Activity, PnlPoint } from "./types"
 
 const PITCH_COLORS: Record<string, string> = {
   FF: "#ef4444", SI: "#f97316", FC: "#eab308", SL: "#facc15",
@@ -358,19 +358,22 @@ function PlayByPlay({ plays }: { plays: Play[] }) {
 }
 
 // ── Order Book Display ──────────────────────────
-type BookLevel = { price: number; size: number; total: number }
+type BookLevel = { price: number; size: number; notional: number; cumulative: number }
 
-// Cumulative USDC depth from the spread outward (Polymarket's "Total" column).
-// Backend already returns one entry per native tick, so no cent-aggregation.
-function withCumulative(levels: OrderBookLevel[]): BookLevel[] {
+// Enrich raw levels with per-level $ notional (drives bar width) and cumulative
+// $ depth from the spread outward (Polymarket's "Total" column). Backend returns
+// one entry per native tick, so no cent-aggregation here.
+function enrichLevels(levels: OrderBookLevel[]): BookLevel[] {
   let cum = 0
   return levels.map(l => {
-    cum += l.price * l.size
-    return { price: l.price, size: l.size, total: cum }
+    const notional = l.price * l.size
+    cum += notional
+    return { price: l.price, size: l.size, notional, cumulative: cum }
   })
 }
 
 const MAX_LEVELS = 7
+const DUST_NOTIONAL = 3 // USDC — levels below this render dimmed (dust vs real liquidity)
 
 function OrderBookDisplay({ book }: { book: OrderBook | null }) {
   if (!book) return null
@@ -379,83 +382,126 @@ function OrderBookDisplay({ book }: { book: OrderBook | null }) {
   const asksBestFirst = [...book.asks].sort((a, b) => a.price - b.price).slice(0, MAX_LEVELS)
   const bidsBestFirst = [...book.bids].sort((a, b) => b.price - a.price).slice(0, MAX_LEVELS)
 
-  const asksWithTotal = withCumulative(asksBestFirst)
-  const bidsWithTotal = withCumulative(bidsBestFirst)
+  const asks = enrichLevels(asksBestFirst)
+  const bids = enrichLevels(bidsBestFirst)
 
-  // Shared scale so ask/bid depth bars are directly comparable.
-  const maxTotal = Math.max(
-    asksWithTotal[asksWithTotal.length - 1]?.total ?? 0,
-    bidsWithTotal[bidsWithTotal.length - 1]?.total ?? 0,
+  // Per-level notional (not cumulative) drives bar width. Cumulative visually
+  // flattens the top-of-book differences — 96/97/98/99¢ cumulative values end
+  // up ~75-100% of the same max, so bars look nearly identical. Per-level
+  // reveals the true size distribution at each tick.
+  const maxNotional = Math.max(
+    ...asks.map(l => l.notional),
+    ...bids.map(l => l.notional),
     1
   )
 
-  // Pad to a fixed row count so the container height stays stable as levels come/go.
-  // Padding goes at the outer edge, keeping best-bid/best-ask anchored to the spread divider.
-  const askPadCount = Math.max(0, MAX_LEVELS - asksWithTotal.length)
-  const bidPadCount = Math.max(0, MAX_LEVELS - bidsWithTotal.length)
+  // Pad to a fixed row count so the container height never changes as levels
+  // come and go. Outer-edge padding keeps best-bid/best-ask anchored to the
+  // spread divider — the user's visual reference point never moves.
+  const askPadCount = Math.max(0, MAX_LEVELS - asks.length)
+  const bidPadCount = Math.max(0, MAX_LEVELS - bids.length)
   const askRows: (BookLevel | null)[] = [
     ...Array(askPadCount).fill(null),
-    ...[...asksWithTotal].reverse(), // worst at top, best ask right above the spread
+    ...[...asks].reverse(), // worst at top, best ask right above the spread
   ]
   const bidRows: (BookLevel | null)[] = [
-    ...bidsWithTotal, // best at top, right below the spread
+    ...bids, // best at top, right below the spread
     ...Array(bidPadCount).fill(null),
   ]
 
-  const empty = asksWithTotal.length === 0 && bidsWithTotal.length === 0
+  const empty = asks.length === 0 && bids.length === 0
+
+  const renderRow = (
+    level: BookLevel | null,
+    isBest: boolean,
+    side: "ask" | "bid",
+    key: string,
+  ) => {
+    if (!level) {
+      // Rest marker for empty slots — keeps the grid rhythm without feeling void.
+      return (
+        <div key={key} className="grid grid-cols-subgrid col-span-4 items-center h-5">
+          <div />
+          <div className="text-center text-muted-foreground/25 font-mono leading-none">·</div>
+          <div />
+          <div />
+        </div>
+      )
+    }
+    const barWidth = (level.notional / maxNotional) * 100
+    const isDust = level.notional < DUST_NOTIONAL
+    const rowOpacity = isDust && !isBest ? "opacity-40" : "opacity-100"
+    const barClass = side === "ask" ? "bg-red-500/15" : "bg-emerald-500/15"
+    const textClass = side === "ask" ? "text-red-400" : "text-emerald-400"
+    const markerClass = side === "ask" ? "bg-red-400" : "bg-emerald-400"
+    return (
+      <div
+        key={key}
+        className={`grid grid-cols-subgrid col-span-4 items-center h-5 transition-opacity duration-200 ${rowOpacity}`}
+      >
+        <div className="relative h-full">
+          <div
+            className={`absolute inset-y-[3px] right-0 ${barClass} rounded-[2px] transition-[width] duration-200 ease-out`}
+            style={{ width: `${barWidth}%` }}
+          />
+          {isBest && (
+            <div className={`absolute right-0 inset-y-[2px] w-[2px] rounded-full ${markerClass}`} />
+          )}
+        </div>
+        <div className={`text-center font-mono ${textClass} ${isBest ? "font-semibold" : "font-medium"}`}>
+          {formatPrice(level.price)}
+        </div>
+        <div className="text-right pr-2 font-mono text-foreground/85">
+          {level.size.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </div>
+        <div className="text-right font-mono text-foreground/55">
+          ${level.cumulative.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="border border-border rounded-lg bg-card p-4 space-y-2">
-      <div className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Order Book</div>
+      <div className="text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Order Book</div>
 
       {empty ? (
         <div className="text-xs text-muted-foreground text-center py-3">
           Liquidity provided by AMM — no limit orders on book
         </div>
       ) : (
-        <div className="grid grid-cols-[1fr_100px_120px_120px] text-[11px] tabular-nums gap-y-px mt-1">
+        <div className="grid grid-cols-[1fr_88px_108px_120px] text-[11px] gap-y-px mt-1">
           {/* Header */}
           <div />
-          <div className="text-center py-1 text-muted-foreground font-medium">PRICE</div>
-          <div className="text-right py-1 text-muted-foreground font-medium pr-2">SHARES</div>
-          <div className="text-right py-1 text-muted-foreground font-medium">TOTAL</div>
+          <div className="text-center pb-1.5 text-muted-foreground/70 font-medium text-[9px] tracking-[0.15em] uppercase">Price</div>
+          <div className="text-right pb-1.5 pr-2 text-muted-foreground/70 font-medium text-[9px] tracking-[0.15em] uppercase">Shares</div>
+          <div className="text-right pb-1.5 text-muted-foreground/70 font-medium text-[9px] tracking-[0.15em] uppercase">Total</div>
+
           {/* Asks (worst at top, best ask right above the spread) */}
-          {askRows.map((level, i) => {
-            if (!level) return <div key={`ask-${i}`} className="col-span-4 h-5" />
-            const barWidth = (level.total / maxTotal) * 100
-            return (
-              <div key={`ask-${i}`} className="grid grid-cols-subgrid col-span-4 items-center">
-                <div className="relative h-5">
-                  <div className="absolute inset-y-0 right-0 bg-red-500/10 rounded-sm" style={{ width: `${barWidth}%` }} />
-                </div>
-                <div className="text-center text-red-400 font-medium">{formatPrice(level.price)}</div>
-                <div className="text-right pr-2">{level.size.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div className="text-right">${level.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              </div>
-            )
-          })}
-          {/* Spread divider — "Spread: X¢" sits under the PRICE column */}
-          <div className="grid grid-cols-subgrid col-span-4 items-center py-1.5 my-1 border-y border-border/50 text-[10px] text-muted-foreground">
-            <div>Last: <span className="text-foreground font-medium tabular-nums">{formatPrice(book.last_trade_price)}</span></div>
-            <div className="text-center">Spread: <span className="text-foreground font-medium tabular-nums">{formatPrice(Math.max(0, book.spread))}</span></div>
+          {askRows.map((level, i) =>
+            renderRow(level, i === askRows.length - 1 && level !== null, "ask", `ask-${i}`)
+          )}
+
+          {/* Spread divider — "Spread" value sits under the PRICE column */}
+          <div className="grid grid-cols-subgrid col-span-4 items-center py-1.5 my-0.5 border-y border-border/60 text-[10px] text-muted-foreground">
+            <div className="font-mono">
+              <span className="uppercase tracking-[0.1em] text-muted-foreground/70">Last</span>{" "}
+              <span className="text-foreground/90 font-medium">{formatPrice(book.last_trade_price)}</span>
+            </div>
+            <div className="text-center font-mono">
+              <span className="uppercase tracking-[0.1em] text-muted-foreground/70">Spread</span>{" "}
+              <span className="text-foreground/90 font-semibold">
+                {formatPrice(Math.max(0, book.spread))}
+              </span>
+            </div>
             <div />
             <div />
           </div>
+
           {/* Bids (best bid at top, right below the spread) */}
-          {bidRows.map((level, i) => {
-            if (!level) return <div key={`bid-${i}`} className="col-span-4 h-5" />
-            const barWidth = (level.total / maxTotal) * 100
-            return (
-              <div key={`bid-${i}`} className="grid grid-cols-subgrid col-span-4 items-center">
-                <div className="relative h-5">
-                  <div className="absolute inset-y-0 right-0 bg-emerald-500/10 rounded-sm" style={{ width: `${barWidth}%` }} />
-                </div>
-                <div className="text-center text-emerald-400 font-medium">{formatPrice(level.price)}</div>
-                <div className="text-right pr-2">{level.size.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-                <div className="text-right">${level.total.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</div>
-              </div>
-            )
-          })}
+          {bidRows.map((level, i) =>
+            renderRow(level, i === 0 && level !== null, "bid", `bid-${i}`)
+          )}
         </div>
       )}
     </div>
@@ -1232,10 +1278,111 @@ function groupPositionsByEvent(positions: Position[]): EventGroup[] {
   return out.sort((a, b) => b.totalValue - a.totalValue)
 }
 
+// ── P/L Sparkline ───────────────────────────────────────────────────
+// Renders the lifetime P/L time-series as an SVG path with a subtle area
+// fill. Gain-colored when the final value is positive, loss-colored otherwise.
+// A zero baseline is drawn if the series crosses zero.
+
+interface SparklineProps {
+  series: PnlPoint[]
+  gain: boolean
+  width?: number
+  height?: number
+}
+
+function PnlSparkline({ series, gain, width = 640, height = 120 }: SparklineProps) {
+  if (series.length < 2) {
+    return (
+      <div
+        className="rounded-lg border border-dashed border-border/40 text-[10px] text-muted-foreground flex items-center justify-center"
+        style={{ height }}
+      >
+        Waiting for P/L history…
+      </div>
+    )
+  }
+
+  const xs = series.map(p => p.t)
+  const ys = series.map(p => p.p)
+  const minT = xs[0]
+  const maxT = xs[xs.length - 1]
+  const minP = Math.min(...ys, 0)
+  const maxP = Math.max(...ys, 0)
+  const padX = 4
+  const padY = 8
+  const w = width - padX * 2
+  const h = height - padY * 2
+
+  const tSpan = Math.max(1, maxT - minT)
+  const pSpan = Math.max(1, maxP - minP)
+
+  const xAt = (t: number) => padX + ((t - minT) / tSpan) * w
+  const yAt = (p: number) => padY + h - ((p - minP) / pSpan) * h
+
+  const pathD = series
+    .map((pt, i) => `${i === 0 ? "M" : "L"}${xAt(pt.t).toFixed(1)},${yAt(pt.p).toFixed(1)}`)
+    .join(" ")
+  const areaD =
+    `${pathD} ` +
+    `L${xAt(maxT).toFixed(1)},${yAt(0).toFixed(1)} ` +
+    `L${xAt(minT).toFixed(1)},${yAt(0).toFixed(1)} Z`
+
+  const zeroY = yAt(0)
+  const lineColor = gain ? "#34d399" : "#f87171"
+  const fillColor = gain ? "rgba(52,211,153,0.18)" : "rgba(248,113,113,0.18)"
+  const gradId = `pnlgrad-${gain ? "g" : "l"}`
+  const lastY = yAt(ys[ys.length - 1])
+  const lastX = xAt(xs[xs.length - 1])
+
+  return (
+    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full block" preserveAspectRatio="none">
+      <defs>
+        <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={fillColor} stopOpacity="1" />
+          <stop offset="100%" stopColor={fillColor} stopOpacity="0" />
+        </linearGradient>
+      </defs>
+
+      {/* Zero baseline */}
+      {minP < 0 && maxP > 0 && (
+        <line
+          x1={padX}
+          x2={width - padX}
+          y1={zeroY}
+          y2={zeroY}
+          stroke="rgba(255,255,255,0.12)"
+          strokeWidth="0.5"
+          strokeDasharray="2,3"
+        />
+      )}
+      {/* Area fill */}
+      <path d={areaD} fill={`url(#${gradId})`} />
+      {/* Main line */}
+      <path d={pathD} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
+      {/* Current dot */}
+      <circle cx={lastX} cy={lastY} r="3" fill={lineColor} />
+      <circle cx={lastX} cy={lastY} r="5" fill={lineColor} opacity="0.25" />
+    </svg>
+  )
+}
+
 function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
-  const gain = p.total_pnl >= 0
-  const pnlColor = gain ? "text-emerald-400" : "text-red-400"
-  const glowColor = gain ? "rgba(52,211,153,0.18)" : "rgba(248,113,113,0.18)"
+  const openGain = p.total_pnl >= 0
+  const openColor = openGain ? "text-emerald-400" : "text-red-400"
+
+  const lifetime = p.lifetime_pnl ?? 0
+  const lifetimeGain = lifetime >= 0
+  const lifetimeColor = lifetimeGain ? "text-emerald-400" : "text-red-400"
+
+  // The ambient wash behind the hero follows the *lifetime* number — that's
+  // the dominant visual here, and the number people look at first.
+  const glowColor = lifetimeGain ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"
+
+  const series = p.pnl_series ?? []
+  const firstT = series[0]?.t
+  const sinceLabel = firstT
+    ? new Date(firstT * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+    : null
 
   return (
     <section className="relative overflow-hidden rounded-2xl border border-border/60 bg-card">
@@ -1247,20 +1394,20 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
           backgroundSize: "22px 22px",
         }}
       />
-      {/* P/L-colored glow wash behind the hero number */}
+      {/* P/L-colored glow wash behind the chart */}
       <div
         className="absolute right-0 top-0 w-[60%] h-full pointer-events-none blur-3xl"
         style={{ background: `radial-gradient(ellipse at right, ${glowColor}, transparent 70%)` }}
       />
-      {/* Hairline corner ticks for editorial feel */}
+      {/* Hairline corner ticks */}
       <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-foreground/30" />
       <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-foreground/30" />
       <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-foreground/30" />
       <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-foreground/30" />
 
-      <div className="relative px-6 md:px-10 pt-8 pb-6">
+      <div className="relative px-6 md:px-10 pt-8 pb-8">
         {/* Top rail */}
-        <div className="flex items-center justify-between gap-4 mb-10">
+        <div className="flex items-center justify-between gap-4 mb-8">
           <div className="flex items-center gap-3">
             <span className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Portfolio</span>
             <span className="text-foreground/30">/</span>
@@ -1282,9 +1429,9 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
           </div>
         </div>
 
-        {/* Hero P/L line */}
-        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
-          <div className="order-2 md:order-1">
+        {/* Primary stats row: Portfolio Value · Open P/L */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6 md:gap-10 mb-8">
+          <div>
             <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
               Portfolio Value
             </div>
@@ -1298,34 +1445,53 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
             </div>
           </div>
 
-          <div className="order-1 md:order-2 text-left md:text-right">
+          <div className="md:text-right">
             <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
-              Unrealized P/L
+              Open Unrealized P/L
             </div>
-            <div className={`text-6xl md:text-8xl font-black tabular-nums leading-[0.9] tracking-tight ${pnlColor}`}>
-              {gain ? "+" : "−"}${Math.abs(p.total_pnl).toLocaleString(undefined, {
+            <div className={`text-4xl md:text-5xl font-black tabular-nums leading-none tracking-tight ${openColor}`}>
+              {openGain ? "+" : "−"}${Math.abs(p.total_pnl).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}
             </div>
-            <div className={`inline-flex items-center gap-2 text-sm font-bold tabular-nums mt-3 ${pnlColor}`}>
-              <span className="text-lg leading-none">{gain ? "▲" : "▼"}</span>
-              <span>{formatPct(Math.abs(p.percent_pnl))}</span>
-              {p.total_realized !== 0 && (
-                <>
-                  <span className="text-muted-foreground/40 font-normal">|</span>
-                  <span className="text-muted-foreground font-normal">
-                    Realized {formatUsd(p.total_realized)}
-                  </span>
-                </>
-              )}
+            <div className={`text-[11px] font-bold tabular-nums mt-2 ${openColor}`}>
+              {openGain ? "▲" : "▼"} {formatPct(Math.abs(p.percent_pnl))}
+              <span className="mx-2 text-muted-foreground/40 font-normal">·</span>
+              <span className="text-muted-foreground font-normal">Live mid-price</span>
+            </div>
+          </div>
+        </div>
+
+        {/* Divider */}
+        <div className="relative h-px bg-gradient-to-r from-transparent via-border to-transparent mb-8" />
+
+        {/* Lifetime P/L block: big number + sparkline chart */}
+        <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-6 md:gap-10 items-center">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
+              All-Time P/L
+            </div>
+            <div className={`text-6xl md:text-7xl font-black tabular-nums leading-[0.9] tracking-tight ${lifetimeColor}`}>
+              {lifetimeGain ? "+" : "−"}${Math.abs(lifetime).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-2 tabular-nums">
+              Lifetime net · Polymarket
+              {sinceLabel && <> · since {sinceLabel}</>}
             </div>
             {(p.resolved_count ?? 0) > 0 && (
-              <div className="text-[10px] text-muted-foreground/70 mt-2 tabular-nums">
-                Excluded {p.resolved_count} settled
+              <div className="text-[10px] text-muted-foreground/70 mt-1 tabular-nums">
+                {p.resolved_count} settled
                 {p.resolved_losses ? <> · sunk {formatUsd(p.resolved_losses)}</> : null}
               </div>
             )}
+          </div>
+
+          <div className="min-w-0 h-[120px]">
+            <PnlSparkline series={series} gain={lifetimeGain} />
           </div>
         </div>
       </div>
@@ -1591,17 +1757,18 @@ function ActivityTimeline({ items }: { items: Activity[] }) {
       </div>
     )
   }
-  const days = groupActivityByDay(items)
+  const shown = items.slice(0, 50)
+  const days = groupActivityByDay(shown)
   return (
     <div className="space-y-3">
       <div className="flex items-baseline justify-between pb-1">
         <h2 className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Activity</h2>
         <span className="text-[10px] text-muted-foreground tabular-nums">
-          {items.length} trade{items.length === 1 ? "" : "s"}
+          {shown.length} trade{shown.length === 1 ? "" : "s"}
         </span>
       </div>
       <div className="rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm overflow-hidden">
-        <div className="max-h-[760px] overflow-y-auto">
+        <div>
           {days.map((day) => (
             <div key={`${day.label}-${day.sub}`}>
               {/* Sticky day header */}
