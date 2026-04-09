@@ -370,7 +370,7 @@ function withCumulative(levels: OrderBookLevel[]): BookLevel[] {
   })
 }
 
-const MAX_LEVELS = 10
+const MAX_LEVELS = 7
 
 function OrderBookDisplay({ book }: { book: OrderBook | null }) {
   if (!book) return null
@@ -382,11 +382,6 @@ function OrderBookDisplay({ book }: { book: OrderBook | null }) {
   const asksWithTotal = withCumulative(asksBestFirst)
   const bidsWithTotal = withCumulative(bidsBestFirst)
 
-  // Display order: asks reversed so worst is at top, best sits right above the spread.
-  // Bids stay best-first so best is right below the spread.
-  const displayAsks = [...asksWithTotal].reverse()
-  const displayBids = bidsWithTotal
-
   // Shared scale so ask/bid depth bars are directly comparable.
   const maxTotal = Math.max(
     asksWithTotal[asksWithTotal.length - 1]?.total ?? 0,
@@ -394,7 +389,20 @@ function OrderBookDisplay({ book }: { book: OrderBook | null }) {
     1
   )
 
-  const empty = displayAsks.length === 0 && displayBids.length === 0
+  // Pad to a fixed row count so the container height stays stable as levels come/go.
+  // Padding goes at the outer edge, keeping best-bid/best-ask anchored to the spread divider.
+  const askPadCount = Math.max(0, MAX_LEVELS - asksWithTotal.length)
+  const bidPadCount = Math.max(0, MAX_LEVELS - bidsWithTotal.length)
+  const askRows: (BookLevel | null)[] = [
+    ...Array(askPadCount).fill(null),
+    ...[...asksWithTotal].reverse(), // worst at top, best ask right above the spread
+  ]
+  const bidRows: (BookLevel | null)[] = [
+    ...bidsWithTotal, // best at top, right below the spread
+    ...Array(bidPadCount).fill(null),
+  ]
+
+  const empty = asksWithTotal.length === 0 && bidsWithTotal.length === 0
 
   return (
     <div className="border border-border rounded-lg bg-card p-4 space-y-2">
@@ -412,7 +420,8 @@ function OrderBookDisplay({ book }: { book: OrderBook | null }) {
           <div className="text-right py-1 text-muted-foreground font-medium pr-2">SHARES</div>
           <div className="text-right py-1 text-muted-foreground font-medium">TOTAL</div>
           {/* Asks (worst at top, best ask right above the spread) */}
-          {displayAsks.map((level, i) => {
+          {askRows.map((level, i) => {
+            if (!level) return <div key={`ask-${i}`} className="col-span-4 h-5" />
             const barWidth = (level.total / maxTotal) * 100
             return (
               <div key={`ask-${i}`} className="grid grid-cols-subgrid col-span-4 items-center">
@@ -425,13 +434,16 @@ function OrderBookDisplay({ book }: { book: OrderBook | null }) {
               </div>
             )
           })}
-          {/* Spread divider */}
-          <div className="col-span-4 flex items-center justify-between py-1.5 my-1 border-y border-border/50 text-[10px] text-muted-foreground gap-x-3">
-            <span>Last: <span className="text-foreground font-medium tabular-nums">{formatPrice(book.last_trade_price)}</span></span>
-            <span>Spread: <span className="text-foreground font-medium tabular-nums">{formatPrice(Math.max(0, book.spread))}</span></span>
+          {/* Spread divider — "Spread: X¢" sits under the PRICE column */}
+          <div className="grid grid-cols-subgrid col-span-4 items-center py-1.5 my-1 border-y border-border/50 text-[10px] text-muted-foreground">
+            <div>Last: <span className="text-foreground font-medium tabular-nums">{formatPrice(book.last_trade_price)}</span></div>
+            <div className="text-center">Spread: <span className="text-foreground font-medium tabular-nums">{formatPrice(Math.max(0, book.spread))}</span></div>
+            <div />
+            <div />
           </div>
           {/* Bids (best bid at top, right below the spread) */}
-          {displayBids.map((level, i) => {
+          {bidRows.map((level, i) => {
+            if (!level) return <div key={`bid-${i}`} className="col-span-4 h-5" />
             const barWidth = (level.total / maxTotal) * 100
             return (
               <div key={`bid-${i}`} className="grid grid-cols-subgrid col-span-4 items-center">
@@ -1105,6 +1117,14 @@ function formatUsd(n: number): string {
   return `${sign}$${abs.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
 }
 
+function formatUsdCompact(n: number): string {
+  const abs = Math.abs(n)
+  const sign = n < 0 ? "-" : ""
+  if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(2)}M`
+  if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`
+  return `${sign}$${abs.toFixed(0)}`
+}
+
 function formatPct(n: number): string {
   const sign = n >= 0 ? "+" : ""
   return `${sign}${n.toFixed(2)}%`
@@ -1112,148 +1132,524 @@ function formatPct(n: number): string {
 
 function formatRelativeTime(unixSeconds: number): string {
   const diff = Date.now() / 1000 - unixSeconds
-  if (diff < 60) return `${Math.floor(diff)}s ago`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
-  return `${Math.floor(diff / 86400)}d ago`
+  if (diff < 60) return `${Math.floor(diff)}s`
+  if (diff < 3600) return `${Math.floor(diff / 60)}m`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
+  return `${Math.floor(diff / 86400)}d`
 }
 
-function PortfolioSummary({ p }: { p: Portfolio }) {
-  const pnlColor = p.total_pnl >= 0 ? "text-emerald-400" : "text-red-400"
+type MarketType = "moneyline" | "spread" | "total" | "nrfi" | "other"
+
+function inferMarketType(title: string, outcome: string): MarketType {
+  const t = title.toLowerCase()
+  const o = outcome.toLowerCase()
+  if (t.startsWith("spread")) return "spread"
+  if (t.includes("o/u") || o.startsWith("over") || o.startsWith("under")) return "total"
+  if (t.includes("run in the first") || o.includes("yes run") || o.includes("no run")) return "nrfi"
+  if (t.includes("vs")) return "moneyline"
+  return "other"
+}
+
+const MARKET_TYPE_META: Record<MarketType, { label: string; dot: string; text: string }> = {
+  moneyline: { label: "ML",   dot: "bg-sky-400",    text: "text-sky-300" },
+  spread:    { label: "SPR",  dot: "bg-orange-400", text: "text-orange-300" },
+  total:     { label: "O/U",  dot: "bg-violet-400", text: "text-violet-300" },
+  nrfi:      { label: "NRFI", dot: "bg-amber-400",  text: "text-amber-300" },
+  other:     { label: "···",  dot: "bg-muted-foreground", text: "text-muted-foreground" },
+}
+
+function MarketTypeBadge({ type }: { type: MarketType }) {
+  const meta = MARKET_TYPE_META[type]
   return (
-    <Card>
-      <CardContent className="p-6">
-        <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-          <div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wider">Portfolio Value</div>
-            <div className="text-3xl font-black tabular-nums mt-1">{formatUsd(p.total_value)}</div>
-            <div className="text-xs text-muted-foreground mt-1 tabular-nums">
-              {p.position_count} position{p.position_count === 1 ? "" : "s"}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wider">Unrealized P/L</div>
-            <div className={`text-3xl font-black tabular-nums mt-1 ${pnlColor}`}>
-              {formatUsd(p.total_pnl)}
-            </div>
-            <div className={`text-xs mt-1 tabular-nums ${pnlColor}`}>
-              {formatPct(p.percent_pnl)}
-            </div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wider">Cost Basis</div>
-            <div className="text-3xl font-black tabular-nums mt-1">{formatUsd(p.total_cost)}</div>
-            <div className="text-xs text-muted-foreground mt-1">Entry amount</div>
-          </div>
-          <div>
-            <div className="text-xs text-muted-foreground uppercase tracking-wider">Realized P/L</div>
-            <div className={`text-3xl font-black tabular-nums mt-1 ${p.total_realized >= 0 ? "text-emerald-400" : "text-red-400"}`}>
-              {formatUsd(p.total_realized)}
-            </div>
-            <div className="text-xs text-muted-foreground mt-1">Locked in</div>
-          </div>
-        </div>
-      </CardContent>
-    </Card>
+    <span className={`inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-[0.1em] ${meta.text}`}>
+      <span className={`w-1 h-1 rounded-full ${meta.dot}`} />
+      {meta.label}
+    </span>
   )
 }
 
-function PositionsTable({ positions }: { positions: Position[] }) {
-  if (positions.length === 0) {
-    return <div className="text-center py-12 text-muted-foreground text-sm">No open positions</div>
+// Derive a clean group header from a position title. Strip "Spread: " prefix
+// and trailing " O/U X.5 Runs" to recover the bare matchup where possible.
+function cleanMatchupTitle(title: string): string {
+  return title
+    .replace(/^Spread:\s*/i, "")
+    .replace(/\s+O\/U\s+\d+\.?\d*\s*(Runs?)?$/i, "")
+    .replace(/\s+\([+-]?\d+\.?\d*\)\s*$/, "")
+}
+
+interface EventGroup {
+  key: string
+  title: string
+  icon: string | null
+  eventSlug: string | null
+  positions: Position[]
+  totalValue: number
+  totalCost: number
+  totalPnl: number
+  percentPnl: number
+}
+
+function groupPositionsByEvent(positions: Position[]): EventGroup[] {
+  const groups = new Map<string, Position[]>()
+  for (const p of positions) {
+    const key = p.event_slug ?? p.condition_id ?? p.title
+    const arr = groups.get(key)
+    if (arr) arr.push(p)
+    else groups.set(key, [p])
   }
+  const out: EventGroup[] = []
+  for (const [key, poses] of groups) {
+    const moneyline = poses.find(p => inferMarketType(p.title, p.outcome) === "moneyline")
+    const representative = moneyline ?? poses[0]
+    const totalValue = poses.reduce((s, p) => s + p.current_value, 0)
+    const totalCost = poses.reduce((s, p) => s + p.initial_value, 0)
+    const totalPnl = poses.reduce((s, p) => s + p.cash_pnl, 0)
+    out.push({
+      key,
+      title: cleanMatchupTitle(representative.title),
+      icon: representative.icon,
+      eventSlug: representative.event_slug,
+      positions: [...poses].sort((a, b) => b.current_value - a.current_value),
+      totalValue,
+      totalCost,
+      totalPnl,
+      percentPnl: totalCost > 0 ? (totalPnl / totalCost) * 100 : 0,
+    })
+  }
+  return out.sort((a, b) => b.totalValue - a.totalValue)
+}
+
+function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
+  const gain = p.total_pnl >= 0
+  const pnlColor = gain ? "text-emerald-400" : "text-red-400"
+  const glowColor = gain ? "rgba(52,211,153,0.18)" : "rgba(248,113,113,0.18)"
+
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead className="sticky top-0 bg-card z-10">
-          <tr className="border-b border-border">
-            <th className="text-left px-3 py-2 text-xs text-muted-foreground font-semibold">Market</th>
-            <th className="text-left px-3 py-2 text-xs text-muted-foreground font-semibold">Side</th>
-            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Shares</th>
-            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Avg</th>
-            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Current</th>
-            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">Value</th>
-            <th className="text-right px-3 py-2 text-xs text-muted-foreground font-semibold">P/L</th>
-          </tr>
-        </thead>
-        <tbody>
-          {positions.map((pos) => {
-            const pnlColor = pos.cash_pnl >= 0 ? "text-emerald-400" : "text-red-400"
-            const href = pos.event_slug ? `https://polymarket.com/event/${pos.event_slug}` : undefined
-            return (
-              <tr key={pos.asset ?? pos.condition_id ?? pos.title} className="border-b border-border/40 hover:bg-secondary/30 transition-colors">
-                <td className="px-3 py-2.5 max-w-[340px]">
-                  <div className="flex items-center gap-2 min-w-0">
-                    {pos.icon && <img src={pos.icon} alt="" className="w-6 h-6 rounded object-cover shrink-0" />}
-                    {href ? (
-                      <a href={href} target="_blank" rel="noreferrer" className="min-w-0 truncate block font-medium hover:text-primary transition-colors">
-                        {pos.title}
-                      </a>
-                    ) : (
-                      <span className="min-w-0 truncate font-medium">{pos.title}</span>
-                    )}
-                  </div>
-                </td>
-                <td className="px-3 py-2.5">
-                  <span className="inline-flex items-center gap-1 text-xs">
-                    <span className="px-1.5 py-0.5 rounded bg-secondary text-foreground/80 font-semibold">
-                      {pos.outcome}
-                    </span>
-                    {pos.is_live && <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" title="Live price" />}
+    <section className="relative overflow-hidden rounded-2xl border border-border/60 bg-card">
+      {/* Dotted grid texture */}
+      <div
+        className="absolute inset-0 pointer-events-none opacity-[0.07]"
+        style={{
+          backgroundImage: "radial-gradient(circle, #ffffff 1px, transparent 1px)",
+          backgroundSize: "22px 22px",
+        }}
+      />
+      {/* P/L-colored glow wash behind the hero number */}
+      <div
+        className="absolute right-0 top-0 w-[60%] h-full pointer-events-none blur-3xl"
+        style={{ background: `radial-gradient(ellipse at right, ${glowColor}, transparent 70%)` }}
+      />
+      {/* Hairline corner ticks for editorial feel */}
+      <div className="absolute top-3 left-3 w-3 h-3 border-t border-l border-foreground/30" />
+      <div className="absolute top-3 right-3 w-3 h-3 border-t border-r border-foreground/30" />
+      <div className="absolute bottom-3 left-3 w-3 h-3 border-b border-l border-foreground/30" />
+      <div className="absolute bottom-3 right-3 w-3 h-3 border-b border-r border-foreground/30" />
+
+      <div className="relative px-6 md:px-10 pt-8 pb-6">
+        {/* Top rail */}
+        <div className="flex items-center justify-between gap-4 mb-10">
+          <div className="flex items-center gap-3">
+            <span className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Portfolio</span>
+            <span className="text-foreground/30">/</span>
+            <span className="text-[11px] font-semibold text-foreground">@{p.username ?? user}</span>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="relative flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] text-emerald-400">
+              <span className="relative flex w-1.5 h-1.5">
+                <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
+                <span className="relative rounded-full w-1.5 h-1.5 bg-emerald-400" />
+              </span>
+              Live
+            </span>
+            {p.wallet && (
+              <span className="text-[10px] text-muted-foreground font-mono tabular-nums">
+                {p.wallet.slice(0, 6)}…{p.wallet.slice(-4)}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Hero P/L line */}
+        <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-6">
+          <div className="order-2 md:order-1">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
+              Portfolio Value
+            </div>
+            <div className="text-4xl md:text-5xl font-black tabular-nums leading-none tracking-tight text-foreground">
+              {formatUsd(p.total_value)}
+            </div>
+            <div className="text-[11px] text-muted-foreground mt-2 tabular-nums">
+              {p.position_count} position{p.position_count === 1 ? "" : "s"}
+              <span className="mx-2 text-foreground/20">·</span>
+              Cost {formatUsd(p.total_cost)}
+            </div>
+          </div>
+
+          <div className="order-1 md:order-2 text-left md:text-right">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
+              Unrealized P/L
+            </div>
+            <div className={`text-6xl md:text-8xl font-black tabular-nums leading-[0.9] tracking-tight ${pnlColor}`}>
+              {gain ? "+" : "−"}${Math.abs(p.total_pnl).toLocaleString(undefined, {
+                minimumFractionDigits: 2,
+                maximumFractionDigits: 2,
+              })}
+            </div>
+            <div className={`inline-flex items-center gap-2 text-sm font-bold tabular-nums mt-3 ${pnlColor}`}>
+              <span className="text-lg leading-none">{gain ? "▲" : "▼"}</span>
+              <span>{formatPct(Math.abs(p.percent_pnl))}</span>
+              {p.total_realized !== 0 && (
+                <>
+                  <span className="text-muted-foreground/40 font-normal">|</span>
+                  <span className="text-muted-foreground font-normal">
+                    Realized {formatUsd(p.total_realized)}
                   </span>
-                </td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{pos.size.toFixed(2)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums text-muted-foreground">{formatPrice(pos.avg_price)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums">{formatPrice(pos.cur_price)}</td>
-                <td className="px-3 py-2.5 text-right tabular-nums font-semibold">{formatUsd(pos.current_value)}</td>
-                <td className={`px-3 py-2.5 text-right tabular-nums font-semibold ${pnlColor}`}>
-                  <div>{formatUsd(pos.cash_pnl)}</div>
-                  <div className="text-[10px] font-normal">{formatPct(pos.percent_pnl)}</div>
-                </td>
-              </tr>
-            )
-          })}
-        </tbody>
-      </table>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  )
+}
+
+function TopMoversRow({ positions }: { positions: Position[] }) {
+  if (positions.length === 0) return null
+  const sorted = [...positions].sort((a, b) => b.cash_pnl - a.cash_pnl)
+  const gainer = sorted[0]
+  const loser = sorted[sorted.length - 1]
+  // Only show if there's a meaningful delta
+  if (gainer.cash_pnl <= 0 && loser.cash_pnl >= 0) return null
+
+  const Card = ({ label, pos, gain }: { label: string; pos: Position; gain: boolean }) => {
+    const color = gain ? "text-emerald-400" : "text-red-400"
+    const bg = gain ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-500/5 border-red-500/20"
+    return (
+      <div className={`relative overflow-hidden rounded-xl border ${bg} p-4`}>
+        <div className={`absolute top-0 left-0 right-0 h-px ${gain ? "bg-emerald-500/40" : "bg-red-500/40"}`} />
+        <div className="flex items-center justify-between mb-3">
+          <span className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{label}</span>
+          <span className={`text-[10px] font-bold uppercase tracking-wider ${color}`}>
+            {gain ? "▲" : "▼"} {formatPct(Math.abs(pos.percent_pnl))}
+          </span>
+        </div>
+        <div className="flex items-start gap-3">
+          {pos.icon && <img src={pos.icon} alt="" className="w-9 h-9 rounded object-cover shrink-0" />}
+          <div className="min-w-0 flex-1">
+            <div className="text-sm font-semibold truncate">{cleanMatchupTitle(pos.title)}</div>
+            <div className="text-[11px] text-muted-foreground truncate mt-0.5">{pos.outcome}</div>
+          </div>
+          <div className={`text-xl font-black tabular-nums leading-none ${color}`}>
+            {formatUsdCompact(pos.cash_pnl)}
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  return (
+    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+      {gainer.cash_pnl > 0 && <Card label="Top Gainer" pos={gainer} gain={true} />}
+      {loser.cash_pnl < 0 && <Card label="Top Loser" pos={loser} gain={false} />}
     </div>
   )
 }
 
-function ActivityFeed({ items }: { items: Activity[] }) {
-  if (items.length === 0) {
-    return <div className="text-center py-8 text-muted-foreground text-sm">No recent activity</div>
-  }
+function PriceProgressionBar({ avg, cur, gain }: { avg: number; cur: number; gain: boolean }) {
+  // Show positions of avg and cur on a 0-1 probability track.
+  const avgPct = Math.max(0, Math.min(100, avg * 100))
+  const curPct = Math.max(0, Math.min(100, cur * 100))
+  const left = Math.min(avgPct, curPct)
+  const width = Math.max(0.5, Math.abs(curPct - avgPct))
+  const barColor = gain ? "bg-emerald-500/60" : "bg-red-500/60"
+  const curColor = gain ? "bg-emerald-400" : "bg-red-400"
   return (
-    <div className="max-h-[600px] overflow-y-auto">
-      {items.map((a, i) => {
-        const sideColor = a.side === "BUY" ? "text-emerald-400" : "text-red-400"
-        const href = a.eventSlug ? `https://polymarket.com/event/${a.eventSlug}` : undefined
-        return (
-          <div key={`${a.transactionHash}-${a.conditionId ?? a.asset ?? i}`} className="px-4 py-3 border-b border-border/50 hover:bg-secondary/20 transition-colors">
-            <div className="flex items-center justify-between gap-3 mb-1">
-              <div className="flex items-center gap-2 min-w-0">
-                {a.icon && <img src={a.icon} alt="" className="w-5 h-5 rounded object-cover shrink-0" />}
-                {href ? (
-                  <a href={href} target="_blank" rel="noreferrer" className="text-sm font-medium truncate hover:text-primary transition-colors">
-                    {a.title}
-                  </a>
-                ) : (
-                  <span className="text-sm font-medium truncate">{a.title}</span>
-                )}
-              </div>
-              <span className="text-xs text-muted-foreground shrink-0 tabular-nums">{formatRelativeTime(a.timestamp)}</span>
-            </div>
-            <div className="flex items-center gap-2 text-xs">
-              <span className={`font-bold uppercase ${sideColor}`}>{a.side}</span>
-              <span className="px-1.5 py-0.5 rounded bg-secondary text-foreground/70">{a.outcome}</span>
-              <span className="text-muted-foreground tabular-nums">
-                {a.size.toFixed(2)} @ {formatPrice(a.price)}
+    <div className="relative h-1 rounded-full bg-secondary/60 overflow-visible">
+      {/* Segment between avg and current */}
+      <div
+        className={`absolute inset-y-0 ${barColor} rounded-full`}
+        style={{ left: `${left}%`, width: `${width}%` }}
+      />
+      {/* Avg tick */}
+      <div
+        className="absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-0.5 h-2.5 rounded-full bg-foreground/50"
+        style={{ left: `${avgPct}%` }}
+      />
+      {/* Current marker (larger) */}
+      <div
+        className={`absolute top-1/2 -translate-y-1/2 -translate-x-1/2 w-2 h-2 rounded-full ring-2 ring-background ${curColor}`}
+        style={{ left: `${curPct}%` }}
+      />
+    </div>
+  )
+}
+
+function PositionRow({ pos }: { pos: Position }) {
+  const gain = pos.cash_pnl >= 0
+  const pnlColor = gain ? "text-emerald-400" : "text-red-400"
+  const type = inferMarketType(pos.title, pos.outcome)
+
+  return (
+    <div className="relative px-5 py-4 border-t border-border/30 hover:bg-secondary/10 transition-colors group">
+      {/* Gain/loss accent stripe on the left edge */}
+      <div className={`absolute left-0 top-0 bottom-0 w-px ${gain ? "bg-emerald-400/40" : "bg-red-400/40"} group-hover:w-0.5 transition-all`} />
+
+      <div className="flex items-center gap-4">
+        {/* Left: type + outcome */}
+        <div className="w-[180px] shrink-0 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <MarketTypeBadge type={type} />
+            {pos.is_live && (
+              <span className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-emerald-400/70">
+                <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+                Live
               </span>
-              <span className="text-muted-foreground tabular-nums ml-auto">{formatUsd(a.usdcSize)}</span>
+            )}
+          </div>
+          <div className="text-sm font-semibold truncate text-foreground">{pos.outcome}</div>
+          <div className="text-[10px] text-muted-foreground tabular-nums mt-0.5">
+            {pos.size.toLocaleString(undefined, { maximumFractionDigits: 0 })} shares
+          </div>
+        </div>
+
+        {/* Middle: price progression bar */}
+        <div className="flex-1 min-w-0 pr-2">
+          <div className="flex items-center gap-3 text-[11px] tabular-nums mb-2">
+            <span className="text-muted-foreground">
+              AVG <span className="text-foreground font-semibold">{formatPrice(pos.avg_price)}</span>
+            </span>
+            <span className="flex-1 h-px bg-border/50" />
+            <span className="text-muted-foreground">
+              NOW <span className={`font-semibold ${gain ? "text-emerald-300" : "text-red-300"}`}>{formatPrice(pos.cur_price)}</span>
+            </span>
+          </div>
+          <PriceProgressionBar avg={pos.avg_price} cur={pos.cur_price} gain={gain} />
+        </div>
+
+        {/* Right: value + P/L stack */}
+        <div className="w-[120px] shrink-0 text-right">
+          <div className="text-base font-bold tabular-nums leading-none">
+            {formatUsd(pos.current_value)}
+          </div>
+          <div className={`text-xs font-semibold tabular-nums mt-1.5 ${pnlColor}`}>
+            {gain ? "+" : ""}{formatUsdCompact(pos.cash_pnl)}
+            <span className="opacity-70 ml-1">{formatPct(pos.percent_pnl)}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EventGroupCard({ group }: { group: EventGroup }) {
+  const gain = group.totalPnl >= 0
+  const pnlColor = gain ? "text-emerald-400" : "text-red-400"
+  const href = group.eventSlug ? `https://polymarket.com/event/${group.eventSlug}` : undefined
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm">
+      {/* Group header */}
+      <div className="relative px-5 py-4 bg-gradient-to-r from-card/80 via-card/60 to-card/30 border-b border-border/40">
+        <div className="flex items-center gap-3">
+          {group.icon && (
+            <div className="relative shrink-0">
+              <img src={group.icon} alt="" className="w-10 h-10 rounded-lg object-cover ring-1 ring-border/60" />
+              <div className={`absolute -inset-px rounded-lg ring-1 ${gain ? "ring-emerald-400/20" : "ring-red-400/20"}`} />
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            {href ? (
+              <a href={href} target="_blank" rel="noreferrer" className="text-sm font-bold truncate hover:text-primary transition-colors block">
+                {group.title}
+              </a>
+            ) : (
+              <div className="text-sm font-bold truncate">{group.title}</div>
+            )}
+            <div className="text-[10px] text-muted-foreground tabular-nums mt-0.5">
+              {group.positions.length} position{group.positions.length === 1 ? "" : "s"}
+              <span className="mx-1.5 text-foreground/20">·</span>
+              {formatUsd(group.totalValue)} value
+              <span className="mx-1.5 text-foreground/20">·</span>
+              Cost {formatUsd(group.totalCost)}
             </div>
           </div>
-        )
-      })}
+          <div className="text-right shrink-0">
+            <div className={`text-lg font-black tabular-nums leading-none ${pnlColor}`}>
+              {gain ? "+" : ""}{formatUsdCompact(group.totalPnl)}
+            </div>
+            <div className={`text-[10px] font-semibold tabular-nums mt-1 ${pnlColor}`}>
+              {gain ? "▲" : "▼"} {formatPct(Math.abs(group.percentPnl))}
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Positions within this event */}
+      <div>
+        {group.positions.map(pos => (
+          <PositionRow key={pos.asset ?? pos.condition_id ?? pos.title} pos={pos} />
+        ))}
+      </div>
+    </div>
+  )
+}
+
+function PositionsBoard({ positions }: { positions: Position[] }) {
+  if (positions.length === 0) {
+    return (
+      <div className="text-center py-16 text-sm text-muted-foreground rounded-xl border border-dashed border-border/50">
+        No open positions
+      </div>
+    )
+  }
+  const groups = groupPositionsByEvent(positions)
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between pb-1">
+        <h2 className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">
+          Open Positions
+        </h2>
+        <span className="text-[10px] text-muted-foreground tabular-nums">
+          {groups.length} event{groups.length === 1 ? "" : "s"}
+          <span className="mx-1.5 text-foreground/20">·</span>
+          {positions.length} position{positions.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="space-y-3">
+        {groups.map(g => <EventGroupCard key={g.key} group={g} />)}
+      </div>
+    </div>
+  )
+}
+
+interface ActivityDay {
+  label: string
+  sub: string
+  items: Activity[]
+  totalUsd: number
+}
+
+function groupActivityByDay(items: Activity[]): ActivityDay[] {
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  const groups = new Map<string, { label: string; sub: string; items: Activity[]; totalUsd: number }>()
+  for (const item of items) {
+    const d = new Date(item.timestamp * 1000)
+    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+    const key = day.toISOString().slice(0, 10)
+
+    let label: string
+    if (day.getTime() === today.getTime()) label = "Today"
+    else if (day.getTime() === yesterday.getTime()) label = "Yesterday"
+    else label = d.toLocaleDateString("en-US", { weekday: "short" })
+    const sub = d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
+
+    const entry = groups.get(key)
+    if (entry) {
+      entry.items.push(item)
+      entry.totalUsd += item.usdcSize
+    } else {
+      groups.set(key, { label, sub, items: [item], totalUsd: item.usdcSize })
+    }
+  }
+  return Array.from(groups.values())
+}
+
+function ActivityTimeline({ items }: { items: Activity[] }) {
+  if (items.length === 0) {
+    return (
+      <div className="space-y-3">
+        <div className="flex items-baseline justify-between pb-1">
+          <h2 className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Activity</h2>
+        </div>
+        <div className="text-center py-12 text-sm text-muted-foreground rounded-xl border border-dashed border-border/50">
+          No recent activity
+        </div>
+      </div>
+    )
+  }
+  const days = groupActivityByDay(items)
+  return (
+    <div className="space-y-3">
+      <div className="flex items-baseline justify-between pb-1">
+        <h2 className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Activity</h2>
+        <span className="text-[10px] text-muted-foreground tabular-nums">
+          {items.length} trade{items.length === 1 ? "" : "s"}
+        </span>
+      </div>
+      <div className="rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm overflow-hidden">
+        <div className="max-h-[760px] overflow-y-auto">
+          {days.map((day) => (
+            <div key={`${day.label}-${day.sub}`}>
+              {/* Sticky day header */}
+              <div className="sticky top-0 z-10 px-5 py-2 bg-card/95 backdrop-blur-sm border-b border-border/40 flex items-baseline justify-between">
+                <div className="flex items-baseline gap-2">
+                  <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-foreground">{day.label}</span>
+                  <span className="text-[10px] text-muted-foreground">{day.sub}</span>
+                </div>
+                <span className="text-[10px] text-muted-foreground tabular-nums">
+                  {day.items.length} · {formatUsdCompact(day.totalUsd)}
+                </span>
+              </div>
+              {/* Trades */}
+              {day.items.map((a, i) => {
+                const buy = a.side === "BUY"
+                const sideColor = buy ? "text-emerald-400" : "text-red-400"
+                const sideBg = buy ? "bg-emerald-500/10 border-emerald-500/20" : "bg-red-500/10 border-red-500/20"
+                const href = a.eventSlug ? `https://polymarket.com/event/${a.eventSlug}` : undefined
+                return (
+                  <div
+                    key={`${a.transactionHash}-${a.conditionId ?? a.asset ?? i}`}
+                    className="relative px-5 py-3 border-b border-border/20 last:border-b-0 hover:bg-secondary/10 transition-colors"
+                  >
+                    <div className="flex items-start gap-3">
+                      {/* Side badge / icon column */}
+                      <div className="flex flex-col items-center shrink-0 pt-0.5">
+                        <div className={`w-7 h-7 rounded-md border ${sideBg} flex items-center justify-center`}>
+                          <span className={`text-[9px] font-black tracking-tight ${sideColor}`}>
+                            {buy ? "BUY" : "SELL"}
+                          </span>
+                        </div>
+                      </div>
+
+                      {/* Content */}
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-baseline justify-between gap-2 mb-1">
+                          {href ? (
+                            <a href={href} target="_blank" rel="noreferrer" className="text-xs font-semibold truncate hover:text-primary transition-colors">
+                              {cleanMatchupTitle(a.title)}
+                            </a>
+                          ) : (
+                            <span className="text-xs font-semibold truncate">{cleanMatchupTitle(a.title)}</span>
+                          )}
+                          <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
+                            {formatRelativeTime(a.timestamp)}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2 text-[11px]">
+                          <span className="px-1.5 py-0.5 rounded bg-secondary/60 text-foreground/70 truncate max-w-[110px]">
+                            {a.outcome}
+                          </span>
+                          <span className="text-muted-foreground tabular-nums">
+                            {a.size.toFixed(0)} × {formatPrice(a.price)}
+                          </span>
+                          <span className="ml-auto text-foreground font-semibold tabular-nums">
+                            {formatUsdCompact(a.usdcSize)}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   )
 }
@@ -1289,7 +1685,7 @@ function PortfolioPage() {
   if (!portfolio) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="max-w-6xl mx-auto p-4">
+        <div className="max-w-[1200px] mx-auto p-4 md:p-6">
           <Link to="/" className="text-sm text-muted-foreground hover:text-foreground mb-4 inline-block">&larr; All Games</Link>
           <div className="text-center py-20 text-muted-foreground text-lg">Loading portfolio...</div>
         </div>
@@ -1300,7 +1696,7 @@ function PortfolioPage() {
   if (!portfolio.available) {
     return (
       <div className="min-h-screen bg-background">
-        <div className="max-w-6xl mx-auto p-4">
+        <div className="max-w-[1200px] mx-auto p-4 md:p-6">
           <Link to="/" className="text-sm text-muted-foreground hover:text-foreground mb-4 inline-block">&larr; All Games</Link>
           <div className="text-center py-20 text-muted-foreground text-lg">
             {portfolio.loading ? "Loading..." : `No portfolio for @${user}`}
@@ -1312,30 +1708,26 @@ function PortfolioPage() {
 
   return (
     <div className="min-h-screen bg-background">
-      <div className="max-w-6xl mx-auto p-4 space-y-3">
+      <div className="max-w-[1200px] mx-auto p-4 md:p-6 space-y-5">
+        {/* Breadcrumb rail */}
         <div className="flex items-center justify-between">
-          <Link to="/" className="text-sm text-muted-foreground hover:text-foreground">&larr; All Games</Link>
-          <div className="text-right">
-            <div className="text-sm font-semibold">@{portfolio.username ?? user}</div>
-            {portfolio.wallet && (
-              <div className="text-[10px] text-muted-foreground font-mono">
-                {portfolio.wallet.slice(0, 6)}…{portfolio.wallet.slice(-4)}
-              </div>
-            )}
-          </div>
+          <Link to="/" className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <span>←</span> All Games
+          </Link>
+          {portfolio.updated_at && (
+            <span className="text-[10px] text-muted-foreground tabular-nums">
+              Updated {new Date(portfolio.updated_at).toLocaleTimeString()}
+            </span>
+          )}
         </div>
 
-        <PortfolioSummary p={portfolio} />
+        <PortfolioHero p={portfolio} user={user} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-3">
-          <Card className="lg:col-span-2">
-            <CardHeader><CardTitle>Positions</CardTitle></CardHeader>
-            <CardContent className="p-0"><PositionsTable positions={portfolio.positions} /></CardContent>
-          </Card>
-          <Card>
-            <CardHeader><CardTitle>Activity</CardTitle></CardHeader>
-            <CardContent className="p-0"><ActivityFeed items={activity} /></CardContent>
-          </Card>
+        <TopMoversRow positions={portfolio.positions} />
+
+        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
+          <PositionsBoard positions={portfolio.positions} />
+          <ActivityTimeline items={activity} />
         </div>
       </div>
     </div>
