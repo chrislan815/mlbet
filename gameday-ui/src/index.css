@@ -78,3 +78,8 @@
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 }
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(1px); }
+  to   { opacity: 1; transform: translateY(0); }
+}

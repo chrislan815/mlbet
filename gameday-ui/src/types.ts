@@ -154,6 +154,8 @@ export interface PnlPoint {
   p: number   // cumulative lifetime P/L at that timestamp (USDC)
 }
 
+export type PnlInterval = "1d" | "1w" | "1m" | "all"
+
 export interface Portfolio {
   available: boolean
   loading?: boolean
@@ -168,7 +170,7 @@ export interface Portfolio {
   resolved_losses?: number
   resolved_count?: number
   lifetime_pnl?: number
-  pnl_series?: PnlPoint[]
+  pnl_series?: Partial<Record<PnlInterval, PnlPoint[]>>
   position_count: number
   updated_at?: string
 }

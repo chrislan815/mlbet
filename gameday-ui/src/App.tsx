@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Routes, Route, Link, useParams } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel, Portfolio, Position, Activity, PnlPoint } from "./types"
+import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel, Portfolio, Position, Activity, PnlPoint, PnlInterval } from "./types"
 
 const PITCH_COLORS: Record<string, string> = {
   FF: "#ef4444", SI: "#f97316", FC: "#eab308", SL: "#facc15",
@@ -1278,19 +1278,62 @@ function groupPositionsByEvent(positions: Position[]): EventGroup[] {
   return out.sort((a, b) => b.totalValue - a.totalValue)
 }
 
-// ── P/L Sparkline ───────────────────────────────────────────────────
-// Renders the lifetime P/L time-series as an SVG path with a subtle area
-// fill. Gain-colored when the final value is positive, loss-colored otherwise.
-// A zero baseline is drawn if the series crosses zero.
+// ── P/L Sparkline + timeframe scrubbing ─────────────────────────────
+// Interactive SVG line chart with crosshair scrubbing and anchored tooltip.
+// Emits hover changes upward so the hero's big number can respond.
+
+const INTERVAL_LABELS: Record<PnlInterval, string> = {
+  "1d": "1D",
+  "1w": "1W",
+  "1m": "1M",
+  "all": "ALL",
+}
+
+function TimeframeSelector({
+  value, onChange, gain,
+}: {
+  value: PnlInterval
+  onChange: (v: PnlInterval) => void
+  gain: boolean
+}) {
+  const accent = gain ? "bg-emerald-400" : "bg-red-400"
+  return (
+    <div className="inline-flex border border-border/60 bg-background/40 divide-x divide-border/60 select-none">
+      {(["1d", "1w", "1m", "all"] as PnlInterval[]).map((tf) => {
+        const active = tf === value
+        return (
+          <button
+            key={tf}
+            onClick={() => onChange(tf)}
+            className={`relative px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.15em] tabular-nums transition-colors cursor-pointer ${
+              active
+                ? "text-foreground bg-card"
+                : "text-muted-foreground hover:text-foreground hover:bg-card/50"
+            }`}
+          >
+            {active && <span className={`absolute left-0 right-0 top-0 h-px ${accent}`} />}
+            {INTERVAL_LABELS[tf]}
+          </button>
+        )
+      })}
+    </div>
+  )
+}
 
 interface SparklineProps {
   series: PnlPoint[]
   gain: boolean
-  width?: number
+  hoverIndex: number | null
+  onHoverChange: (idx: number | null) => void
   height?: number
 }
 
-function PnlSparkline({ series, gain, width = 640, height = 120 }: SparklineProps) {
+function PnlSparkline({
+  series, gain, hoverIndex, onHoverChange, height = 140,
+}: SparklineProps) {
+  const svgRef = useRef<SVGSVGElement>(null)
+  const width = 640   // viewBox coordinate space; SVG scales via CSS
+
   if (series.length < 2) {
     return (
       <div
@@ -1308,8 +1351,8 @@ function PnlSparkline({ series, gain, width = 640, height = 120 }: SparklineProp
   const maxT = xs[xs.length - 1]
   const minP = Math.min(...ys, 0)
   const maxP = Math.max(...ys, 0)
-  const padX = 4
-  const padY = 8
+  const padX = 6
+  const padY = 14
   const w = width - padX * 2
   const h = height - padY * 2
 
@@ -1329,13 +1372,45 @@ function PnlSparkline({ series, gain, width = 640, height = 120 }: SparklineProp
 
   const zeroY = yAt(0)
   const lineColor = gain ? "#34d399" : "#f87171"
-  const fillColor = gain ? "rgba(52,211,153,0.18)" : "rgba(248,113,113,0.18)"
+  const fillColor = gain ? "rgba(52,211,153,0.20)" : "rgba(248,113,113,0.20)"
   const gradId = `pnlgrad-${gain ? "g" : "l"}`
-  const lastY = yAt(ys[ys.length - 1])
   const lastX = xAt(xs[xs.length - 1])
+  const lastY = yAt(ys[ys.length - 1])
+
+  // Convert pointer X to the nearest series index.
+  function handlePointer(clientX: number) {
+    const rect = svgRef.current?.getBoundingClientRect()
+    if (!rect) return
+    const localX = ((clientX - rect.left) / rect.width) * width
+    const t = minT + ((localX - padX) / w) * tSpan
+    // Binary search for nearest
+    let lo = 0, hi = series.length - 1
+    while (lo < hi) {
+      const mid = (lo + hi) >> 1
+      if (series[mid].t < t) lo = mid + 1
+      else hi = mid
+    }
+    let idx = lo
+    if (idx > 0 && Math.abs(series[idx - 1].t - t) < Math.abs(series[idx].t - t)) idx = idx - 1
+    onHoverChange(idx)
+  }
+
+  const hover = hoverIndex != null ? series[hoverIndex] : null
+  const hoverX = hover ? xAt(hover.t) : 0
+  const hoverY = hover ? yAt(hover.p) : 0
 
   return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="w-full h-full block" preserveAspectRatio="none">
+    <svg
+      ref={svgRef}
+      viewBox={`0 0 ${width} ${height}`}
+      className="w-full h-full block cursor-crosshair touch-none select-none"
+      preserveAspectRatio="none"
+      onMouseMove={(e) => handlePointer(e.clientX)}
+      onMouseLeave={() => onHoverChange(null)}
+      onTouchStart={(e) => { e.preventDefault(); if (e.touches[0]) handlePointer(e.touches[0].clientX) }}
+      onTouchMove={(e) => { e.preventDefault(); if (e.touches[0]) handlePointer(e.touches[0].clientX) }}
+      onTouchEnd={() => onHoverChange(null)}
+    >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%" stopColor={fillColor} stopOpacity="1" />
@@ -1343,25 +1418,70 @@ function PnlSparkline({ series, gain, width = 640, height = 120 }: SparklineProp
         </linearGradient>
       </defs>
 
+      {/* Chart frame hairlines (top + bottom ticks at each end) */}
+      <line x1={padX} x2={padX} y1={padY - 6} y2={padY - 1} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
+      <line x1={width - padX} x2={width - padX} y1={padY - 6} y2={padY - 1} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
+      <line x1={padX} x2={padX} y1={padY + h + 1} y2={padY + h + 6} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
+      <line x1={width - padX} x2={width - padX} y1={padY + h + 1} y2={padY + h + 6} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
+
       {/* Zero baseline */}
       {minP < 0 && maxP > 0 && (
-        <line
-          x1={padX}
-          x2={width - padX}
-          y1={zeroY}
-          y2={zeroY}
-          stroke="rgba(255,255,255,0.12)"
-          strokeWidth="0.5"
-          strokeDasharray="2,3"
-        />
+        <>
+          <line
+            x1={padX} x2={width - padX} y1={zeroY} y2={zeroY}
+            stroke="rgba(255,255,255,0.14)" strokeWidth="0.5" strokeDasharray="2,3"
+          />
+          <text
+            x={width - padX - 2} y={zeroY - 3}
+            fontSize="8" fill="rgba(255,255,255,0.35)"
+            textAnchor="end" fontFamily="ui-monospace, SFMono-Regular, monospace"
+          >
+            0
+          </text>
+        </>
       )}
-      {/* Area fill */}
+
+      {/* Area fill + main line */}
       <path d={areaD} fill={`url(#${gradId})`} />
-      {/* Main line */}
-      <path d={pathD} fill="none" stroke={lineColor} strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" />
-      {/* Current dot */}
-      <circle cx={lastX} cy={lastY} r="3" fill={lineColor} />
-      <circle cx={lastX} cy={lastY} r="5" fill={lineColor} opacity="0.25" />
+      <path
+        d={pathD} fill="none" stroke={lineColor} strokeWidth="1.75"
+        strokeLinejoin="round" strokeLinecap="round"
+      />
+
+      {/* Resting marker at current (rightmost) point */}
+      {hover == null && (
+        <>
+          <circle cx={lastX} cy={lastY} r="5" fill={lineColor} opacity="0.18">
+            <animate attributeName="r" values="4;7;4" dur="2.4s" repeatCount="indefinite" />
+            <animate attributeName="opacity" values="0.18;0.05;0.18" dur="2.4s" repeatCount="indefinite" />
+          </circle>
+          <circle cx={lastX} cy={lastY} r="2.2" fill={lineColor} />
+        </>
+      )}
+
+      {/* Hover crosshair + square marker (surveyor's mark) */}
+      {hover && (
+        <>
+          {/* Vertical line (full height) */}
+          <line
+            x1={hoverX} x2={hoverX} y1={padY - 8} y2={padY + h + 8}
+            stroke="rgba(255,255,255,0.35)" strokeWidth="0.6" strokeDasharray="1.5,2.5"
+          />
+          {/* Horizontal line (full width) */}
+          <line
+            x1={padX - 4} x2={width - padX + 4} y1={hoverY} y2={hoverY}
+            stroke="rgba(255,255,255,0.2)" strokeWidth="0.6" strokeDasharray="1.5,2.5"
+          />
+          {/* Square marker rotated 45° */}
+          <rect
+            x={hoverX - 4} y={hoverY - 4} width="8" height="8"
+            transform={`rotate(45 ${hoverX} ${hoverY})`}
+            fill="none" stroke={lineColor} strokeWidth="1.4"
+          />
+          {/* Inner dot */}
+          <circle cx={hoverX} cy={hoverY} r="1.6" fill={lineColor} />
+        </>
+      )}
     </svg>
   )
 }
@@ -1371,18 +1491,52 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
   const openColor = openGain ? "text-emerald-400" : "text-red-400"
 
   const lifetime = p.lifetime_pnl ?? 0
-  const lifetimeGain = lifetime >= 0
-  const lifetimeColor = lifetimeGain ? "text-emerald-400" : "text-red-400"
+  const pnlMap = (p.pnl_series ?? {}) as Partial<Record<PnlInterval, PnlPoint[]>>
 
-  // The ambient wash behind the hero follows the *lifetime* number — that's
-  // the dominant visual here, and the number people look at first.
-  const glowColor = lifetimeGain ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"
+  const [timeframe, setTimeframe] = useState<PnlInterval>("all")
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null)
 
-  const series = p.pnl_series ?? []
-  const firstT = series[0]?.t
-  const sinceLabel = firstT
-    ? new Date(firstT * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+  // Reset the hover when switching timeframe
+  useEffect(() => { setHoverIndex(null) }, [timeframe])
+
+  const series = pnlMap[timeframe] ?? pnlMap.all ?? []
+
+  // The number shown when not hovering:
+  //  • all      → cumulative lifetime P/L (same as the last point)
+  //  • 1d/1w/1m → delta between first and last point of the window
+  const windowDelta = series.length >= 2
+    ? series[series.length - 1].p - series[0].p
+    : 0
+  const defaultValue = timeframe === "all" ? lifetime : windowDelta
+  const defaultLabel = timeframe === "all"
+    ? "All-Time P/L"
+    : `${INTERVAL_LABELS[timeframe]} Change`
+
+  // If hovering, surface the instantaneous cumulative at that point.
+  const hoverPoint = hoverIndex != null ? series[hoverIndex] : null
+  const shownValue = hoverPoint ? hoverPoint.p : defaultValue
+  const shownLabel = hoverPoint
+    ? new Date(hoverPoint.t * 1000).toLocaleString("en-US", {
+        month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+      })
+    : defaultLabel
+
+  const shownGain = shownValue >= 0
+  const shownColor = shownGain ? "text-emerald-400" : "text-red-400"
+
+  // The ambient glow follows the dominant number currently on screen
+  const glowColor = shownGain ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"
+
+  const firstAllT = (pnlMap.all ?? [])[0]?.t
+  const sinceLabel = firstAllT
+    ? new Date(firstAllT * 1000).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
     : null
+
+  // For the chart window label (start — end) under the chart
+  const windowStart = series[0]?.t
+  const windowEnd = series[series.length - 1]?.t
+  const fmtShort = (t: number) =>
+    new Date(t * 1000).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric" })
 
   return (
     <section className="relative overflow-hidden rounded-2xl border border-border/60 bg-card">
@@ -1394,9 +1548,9 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
           backgroundSize: "22px 22px",
         }}
       />
-      {/* P/L-colored glow wash behind the chart */}
+      {/* P/L-colored glow wash */}
       <div
-        className="absolute right-0 top-0 w-[60%] h-full pointer-events-none blur-3xl"
+        className="absolute right-0 top-0 w-[60%] h-full pointer-events-none blur-3xl transition-colors duration-500"
         style={{ background: `radial-gradient(ellipse at right, ${glowColor}, transparent 70%)` }}
       />
       {/* Hairline corner ticks */}
@@ -1466,23 +1620,28 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
         {/* Divider */}
         <div className="relative h-px bg-gradient-to-r from-transparent via-border to-transparent mb-8" />
 
-        {/* Lifetime P/L block: big number + sparkline chart */}
-        <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-6 md:gap-10 items-center">
-          <div>
-            <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1">
-              All-Time P/L
+        {/* Lifetime block: dynamic label/number + interactive chart */}
+        <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-6 md:gap-10 items-start">
+          <div className="md:min-w-[240px]">
+            {/* Label line — animates between default and hover state */}
+            <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1 h-3.5">
+              <span key={shownLabel} className="inline-block animate-[fadeIn_180ms_ease-out]">
+                {shownLabel}
+              </span>
             </div>
-            <div className={`text-6xl md:text-7xl font-black tabular-nums leading-[0.9] tracking-tight ${lifetimeColor}`}>
-              {lifetimeGain ? "+" : "−"}${Math.abs(lifetime).toLocaleString(undefined, {
+            {/* Hero number */}
+            <div className={`text-5xl md:text-7xl font-black tabular-nums leading-[0.9] tracking-tight ${shownColor} transition-colors duration-150`}>
+              {shownGain ? "+" : "−"}${Math.abs(shownValue).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}
             </div>
             <div className="text-[11px] text-muted-foreground mt-2 tabular-nums">
-              Lifetime net · Polymarket
-              {sinceLabel && <> · since {sinceLabel}</>}
+              {hoverPoint
+                ? <>Scrubbing · release to resume</>
+                : <>Lifetime net · Polymarket{sinceLabel && <> · since {sinceLabel}</>}</>}
             </div>
-            {(p.resolved_count ?? 0) > 0 && (
+            {!hoverPoint && (p.resolved_count ?? 0) > 0 && (
               <div className="text-[10px] text-muted-foreground/70 mt-1 tabular-nums">
                 {p.resolved_count} settled
                 {p.resolved_losses ? <> · sunk {formatUsd(p.resolved_losses)}</> : null}
@@ -1490,8 +1649,31 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
             )}
           </div>
 
-          <div className="min-w-0 h-[120px]">
-            <PnlSparkline series={series} gain={lifetimeGain} />
+          {/* Chart column: selector above, chart below, scale rail under */}
+          <div className="min-w-0">
+            <div className="flex items-center justify-end mb-3">
+              <TimeframeSelector
+                value={timeframe}
+                onChange={setTimeframe}
+                gain={defaultValue >= 0}
+              />
+            </div>
+            <div className="h-[140px] min-w-0">
+              <PnlSparkline
+                series={series}
+                gain={defaultValue >= 0}
+                hoverIndex={hoverIndex}
+                onHoverChange={setHoverIndex}
+              />
+            </div>
+            {/* Window scale rail: start, midline marker, end */}
+            {windowStart && windowEnd && (
+              <div className="flex items-center justify-between text-[9px] text-muted-foreground/70 tabular-nums mt-1 px-[6px] font-mono">
+                <span>{fmtShort(windowStart)}</span>
+                <span className="flex-1 mx-3 h-px bg-border/40" />
+                <span>{fmtShort(windowEnd)}</span>
+              </div>
+            )}
           </div>
         </div>
       </div>
@@ -1715,6 +1897,24 @@ interface ActivityDay {
   totalUsd: number
 }
 
+// Merge trades that are the same fill event — same side, same market + outcome,
+// same price, same block timestamp. On-chain sweeps often emit multiple rows
+// (one per counterparty match) that are really one user action.
+function aggregateActivity(items: Activity[]): Activity[] {
+  const groups = new Map<string, Activity>()
+  for (const a of items) {
+    const key = `${a.side}|${a.conditionId}|${a.outcomeIndex}|${a.price}|${a.timestamp}`
+    const existing = groups.get(key)
+    if (existing) {
+      existing.size += a.size
+      existing.usdcSize += a.usdcSize
+    } else {
+      groups.set(key, { ...a })
+    }
+  }
+  return Array.from(groups.values()).sort((x, y) => y.timestamp - x.timestamp)
+}
+
 function groupActivityByDay(items: Activity[]): ActivityDay[] {
   const now = new Date()
   const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
@@ -1757,7 +1957,7 @@ function ActivityTimeline({ items }: { items: Activity[] }) {
       </div>
     )
   }
-  const shown = items.slice(0, 50)
+  const shown = aggregateActivity(items).slice(0, 50)
   const days = groupActivityByDay(shown)
   return (
     <div className="space-y-3">
