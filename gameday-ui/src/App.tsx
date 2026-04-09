@@ -248,7 +248,7 @@ function CountDisplay({ count }: { count: Count }) {
         <span className="text-xs font-bold text-muted-foreground w-3">S</span>
         {[0, 1].map((i) => (
           <div key={i} className={`w-3.5 h-3.5 rounded-full border-2 transition-colors duration-200 ${
-            i < count.strikes ? "bg-red-400 border-red-400" : "border-muted-foreground/40"
+            i < count.strikes ? "bg-red-300 border-red-300" : "border-muted-foreground/40"
           }`} />
         ))}
       </div>
@@ -431,9 +431,9 @@ function OrderBookDisplay({ book }: { book: OrderBook | null }) {
     const barWidth = (level.notional / maxNotional) * 100
     const isDust = level.notional < DUST_NOTIONAL
     const rowOpacity = isDust && !isBest ? "opacity-40" : "opacity-100"
-    const barClass = side === "ask" ? "bg-red-500/15" : "bg-emerald-500/15"
-    const textClass = side === "ask" ? "text-red-400" : "text-emerald-400"
-    const markerClass = side === "ask" ? "bg-red-400" : "bg-emerald-400"
+    const barClass = side === "ask" ? "bg-red-300/15" : "bg-emerald-500/15"
+    const textClass = side === "ask" ? "text-red-300" : "text-emerald-400"
+    const markerClass = side === "ask" ? "bg-red-300" : "bg-emerald-400"
     return (
       <div
         key={key}
@@ -913,7 +913,7 @@ function YourOrders({ gamePk, home, away }: { gamePk: number; home: string; away
         <div className="space-y-1.5">
           {orders.map((o) => {
             const label = shortName(o.outcome_name, home, away)
-            const sideColor = o.side === "buy" ? "text-emerald-400" : "text-red-400"
+            const sideColor = o.side === "buy" ? "text-emerald-400" : "text-red-300"
             return (
               <div key={o.id} className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-white/[0.03] border border-white/[0.05]">
                 <div className="min-w-0 flex-1">
@@ -929,7 +929,7 @@ function YourOrders({ gamePk, home, away }: { gamePk: number; home: string; away
                 </div>
                 <button
                   onClick={() => removeOrder(o.id)}
-                  className="text-muted-foreground/60 hover:text-red-400 text-xs ml-2 cursor-pointer"
+                  className="text-muted-foreground/60 hover:text-red-300 text-xs ml-2 cursor-pointer"
                   title="Remove"
                 >
                   ✕
@@ -940,6 +940,65 @@ function YourOrders({ gamePk, home, away }: { gamePk: number; home: string; away
         </div>
       )}
     </div>
+  )
+}
+
+// ── Mini Portfolio Bar (home page header strip) ─────
+function MiniPortfolioBar({ user }: { user: string }) {
+  const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    fetch(`/api/portfolio/${user}`, { signal: controller.signal })
+      .then(r => r.json()).then(setPortfolio).catch(() => {})
+    const es = new EventSource(`/api/portfolio/${user}/stream`)
+    es.onmessage = (e) => setPortfolio(JSON.parse(e.data))
+    return () => { controller.abort(); es.close() }
+  }, [user])
+
+  if (!portfolio?.available) return null
+
+  const openGain = portfolio.total_pnl >= 0
+  const lifetime = portfolio.lifetime_pnl ?? 0
+  const lifetimeGain = lifetime >= 0
+  const openColor = openGain ? "text-emerald-400" : "text-red-300"
+  const lifetimeColor = lifetimeGain ? "text-emerald-400" : "text-red-300"
+  const openSign = openGain ? "+" : "−"
+  const lifetimeSign = lifetimeGain ? "+" : "−"
+
+  const Stat = ({ label, value, color, align = "left" }: {
+    label: string; value: string; color?: string; align?: "left" | "right"
+  }) => (
+    <div className={align === "right" ? "text-right" : ""}>
+      <div className="text-[9px] uppercase tracking-[0.18em] text-muted-foreground/80">{label}</div>
+      <div className={`text-lg font-bold tabular-nums leading-tight mt-0.5 ${color ?? "text-foreground"}`}>
+        {value}
+      </div>
+    </div>
+  )
+
+  return (
+    <Link
+      to={`/portfolio/${user}`}
+      className="group block rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm hover:bg-card hover:border-border transition-colors px-4 py-3 mb-4"
+    >
+      <div className="flex items-center justify-between gap-4">
+        <Stat label="Portfolio" value={formatUsd(portfolio.total_value)} />
+        <div className="h-8 w-px bg-border/50" />
+        <Stat
+          label="Open P/L"
+          value={`${openSign}${formatUsdCompact(Math.abs(portfolio.total_pnl))}`}
+          color={openColor}
+        />
+        <div className="h-8 w-px bg-border/50" />
+        <Stat
+          label="All-Time"
+          value={`${lifetimeSign}${formatUsdCompact(Math.abs(lifetime))}`}
+          color={lifetimeColor}
+          align="right"
+        />
+      </div>
+    </Link>
   )
 }
 
@@ -978,20 +1037,12 @@ function HomePage() {
   return (
     <div className="min-h-screen bg-background">
       <div className="max-w-2xl mx-auto p-4">
+        {/* Live portfolio strip */}
+        <MiniPortfolioBar user="whycantilose" />
+
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">MLB Gameday</h1>
-          <Link
-            to="/portfolio/whycantilose"
-            className="group inline-flex items-center gap-2 px-3 py-1.5 rounded-lg border border-border/60 bg-card/40 hover:bg-card hover:border-border transition-colors"
-          >
-            <span className="relative flex w-1.5 h-1.5">
-              <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
-              <span className="relative rounded-full w-1.5 h-1.5 bg-emerald-400" />
-            </span>
-            <span className="text-xs font-semibold">Portfolio</span>
-            <span className="text-[10px] text-muted-foreground group-hover:text-foreground transition-colors">→</span>
-          </Link>
         </div>
 
         {/* Date navigation */}
@@ -1296,7 +1347,7 @@ function TimeframeSelector({
   onChange: (v: PnlInterval) => void
   gain: boolean
 }) {
-  const accent = gain ? "bg-emerald-400" : "bg-red-400"
+  const accent = gain ? "bg-emerald-400" : "bg-red-300"
   return (
     <div className="inline-flex border border-border/60 bg-background/40 divide-x divide-border/60 select-none">
       {(["1d", "1w", "1m", "all"] as PnlInterval[]).map((tf) => {
@@ -1488,7 +1539,7 @@ function PnlSparkline({
 
 function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
   const openGain = p.total_pnl >= 0
-  const openColor = openGain ? "text-emerald-400" : "text-red-400"
+  const openColor = openGain ? "text-emerald-400" : "text-red-300"
 
   const lifetime = p.lifetime_pnl ?? 0
   const pnlMap = (p.pnl_series ?? {}) as Partial<Record<PnlInterval, PnlPoint[]>>
@@ -1522,7 +1573,7 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
     : defaultLabel
 
   const shownGain = shownValue >= 0
-  const shownColor = shownGain ? "text-emerald-400" : "text-red-400"
+  const shownColor = shownGain ? "text-emerald-400" : "text-red-300"
 
   // The ambient glow follows the dominant number currently on screen
   const glowColor = shownGain ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"
@@ -1698,11 +1749,11 @@ function TopMoversRow({ positions }: { positions: Position[] }) {
   if (gainer.cash_pnl <= 0 && loser.cash_pnl >= 0) return null
 
   const Card = ({ label, pos, gain }: { label: string; pos: Position; gain: boolean }) => {
-    const color = gain ? "text-emerald-400" : "text-red-400"
-    const bg = gain ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-500/5 border-red-500/20"
+    const color = gain ? "text-emerald-400" : "text-red-300"
+    const bg = gain ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-300/5 border-red-300/20"
     return (
       <div className={`relative overflow-hidden rounded-xl border ${bg} p-4`}>
-        <div className={`absolute top-0 left-0 right-0 h-px ${gain ? "bg-emerald-500/40" : "bg-red-500/40"}`} />
+        <div className={`absolute top-0 left-0 right-0 h-px ${gain ? "bg-emerald-500/40" : "bg-red-300/40"}`} />
         <div className="flex items-center justify-between mb-3">
           <span className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{label}</span>
           <span className={`text-[10px] font-bold uppercase tracking-wider ${color}`}>
@@ -1737,8 +1788,8 @@ function PriceProgressionBar({ avg, cur, gain }: { avg: number; cur: number; gai
   const curPct = Math.max(0, Math.min(100, cur * 100))
   const left = Math.min(avgPct, curPct)
   const width = Math.max(0.5, Math.abs(curPct - avgPct))
-  const barColor = gain ? "bg-emerald-500/60" : "bg-red-500/60"
-  const curColor = gain ? "bg-emerald-400" : "bg-red-400"
+  const barColor = gain ? "bg-emerald-500/60" : "bg-red-300/60"
+  const curColor = gain ? "bg-emerald-400" : "bg-red-300"
   return (
     <div className="relative h-1 rounded-full bg-secondary/60 overflow-visible">
       {/* Segment between avg and current */}
@@ -1762,13 +1813,13 @@ function PriceProgressionBar({ avg, cur, gain }: { avg: number; cur: number; gai
 
 function PositionRow({ pos }: { pos: Position }) {
   const gain = pos.cash_pnl >= 0
-  const pnlColor = gain ? "text-emerald-400" : "text-red-400"
+  const pnlColor = gain ? "text-emerald-400" : "text-red-300"
   const type = inferMarketType(pos.title, pos.outcome)
 
   return (
     <div className="relative px-5 py-4 border-t border-border/30 hover:bg-secondary/10 transition-colors group">
       {/* Gain/loss accent stripe on the left edge */}
-      <div className={`absolute left-0 top-0 bottom-0 w-px ${gain ? "bg-emerald-400/40" : "bg-red-400/40"} group-hover:w-0.5 transition-all`} />
+      <div className={`absolute left-0 top-0 bottom-0 w-px ${gain ? "bg-emerald-400/40" : "bg-red-300/40"} group-hover:w-0.5 transition-all`} />
 
       <div className="flex items-center gap-4">
         {/* Left: type + outcome */}
@@ -1819,7 +1870,7 @@ function PositionRow({ pos }: { pos: Position }) {
 
 function EventGroupCard({ group }: { group: EventGroup }) {
   const gain = group.totalPnl >= 0
-  const pnlColor = gain ? "text-emerald-400" : "text-red-400"
+  const pnlColor = gain ? "text-emerald-400" : "text-red-300"
   const href = group.eventSlug ? `https://polymarket.com/event/${group.eventSlug}` : undefined
 
   return (
@@ -1830,7 +1881,7 @@ function EventGroupCard({ group }: { group: EventGroup }) {
           {group.icon && (
             <div className="relative shrink-0">
               <img src={group.icon} alt="" className="w-10 h-10 rounded-lg object-cover ring-1 ring-border/60" />
-              <div className={`absolute -inset-px rounded-lg ring-1 ${gain ? "ring-emerald-400/20" : "ring-red-400/20"}`} />
+              <div className={`absolute -inset-px rounded-lg ring-1 ${gain ? "ring-emerald-400/20" : "ring-red-300/20"}`} />
             </div>
           )}
           <div className="flex-1 min-w-0">
@@ -1992,8 +2043,8 @@ function ActivityTimeline({ items }: { items: Activity[] }) {
               {/* Trades */}
               {day.items.map((a, i) => {
                 const buy = a.side === "BUY"
-                const sideColor = buy ? "text-emerald-400" : "text-red-400"
-                const sideBg = buy ? "bg-emerald-500/10 border-emerald-500/20" : "bg-red-500/10 border-red-500/20"
+                const sideColor = buy ? "text-emerald-400" : "text-red-300"
+                const sideBg = buy ? "bg-emerald-500/10 border-emerald-500/20" : "bg-red-300/10 border-red-300/20"
                 const href = a.eventSlug ? `https://polymarket.com/event/${a.eventSlug}` : undefined
                 return (
                   <div
