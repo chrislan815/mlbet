@@ -818,6 +818,7 @@ def _materialize_portfolio(wallet: str) -> dict:
 
     positions_out: list[dict] = []
     total_value = 0.0
+    api_total_value = 0.0  # same positions priced at the data-api's stale curPrice
     total_cost = 0.0
     total_realized = 0.0
     resolved_losses = 0.0
@@ -849,6 +850,7 @@ def _materialize_portfolio(wallet: str) -> dict:
         percent_pnl = (cash_pnl / initial_value * 100) if initial_value > 0 else 0.0
 
         total_value += current_value
+        api_total_value += api_current_value
         total_cost += initial_value
 
         positions_out.append({
@@ -874,10 +876,28 @@ def _materialize_portfolio(wallet: str) -> dict:
     percent_pnl = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
 
     # Lifetime P/L: per-interval time series from Polymarket's user-pnl-api.
-    # The `all` series' final point is the current net lifetime P/L.
+    # The `all` series' final point is Polymarket's net lifetime P/L, but that
+    # endpoint only updates on a slow backend cadence — without adjustment the
+    # big headline number sits frozen while Open Unrealized ticks live. Treat
+    # the cached value as a baseline and swap in the live mid-price unrealized
+    # component: (live total_value − api total_value) cancels the stale
+    # unrealized inside the baseline and replaces it with fresh mark-to-market.
     pnl_map = _portfolio_pnl_cache.get(wallet, {})
     all_series = pnl_map.get("all", [])
-    lifetime_pnl = float(all_series[-1].get("p", 0)) if all_series else 0.0
+    live_adjustment = total_value - api_total_value
+    lifetime_pnl = (float(all_series[-1].get("p", 0)) if all_series else 0.0) + live_adjustment
+
+    # Rewrite the tip of each interval series so the chart line reflects the
+    # live-adjusted value at "now". Historical points stay as Polymarket
+    # reported them. Only the last point moves with WS ticks.
+    pnl_series_out: dict[str, list[dict]] = {}
+    for interval, raw in pnl_map.items():
+        if raw:
+            last = raw[-1]
+            adjusted_last = {"t": last.get("t"), "p": float(last.get("p", 0)) + live_adjustment}
+            pnl_series_out[interval] = [*raw[:-1], adjusted_last]
+        else:
+            pnl_series_out[interval] = raw
 
     return {
         "available": True,
@@ -892,7 +912,7 @@ def _materialize_portfolio(wallet: str) -> dict:
         "resolved_losses": resolved_losses,
         "resolved_count": resolved_count,
         "lifetime_pnl": lifetime_pnl,
-        "pnl_series": pnl_map,
+        "pnl_series": pnl_series_out,
         "position_count": len(positions_out),
         "updated_at": cached.get("updated_at"),
     }
