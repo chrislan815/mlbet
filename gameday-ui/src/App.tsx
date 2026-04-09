@@ -1299,6 +1299,14 @@ interface EventGroup {
   percentPnl: number
 }
 
+// Canonical pnl formulas. Mirrors _pnl_stats in gameday/app.py — the backend
+// computes every top-level number; this helper only exists for UI-side
+// aggregations like event grouping where we re-roll positions into buckets.
+function pnlStats(currentValue: number, cost: number): { cashPnl: number; percentPnl: number } {
+  const cashPnl = currentValue - cost
+  return { cashPnl, percentPnl: cost > 0 ? (cashPnl / cost) * 100 : 0 }
+}
+
 function groupPositionsByEvent(positions: Position[]): EventGroup[] {
   const groups = new Map<string, Position[]>()
   for (const p of positions) {
@@ -1313,7 +1321,7 @@ function groupPositionsByEvent(positions: Position[]): EventGroup[] {
     const representative = moneyline ?? poses[0]
     const totalValue = poses.reduce((s, p) => s + p.current_value, 0)
     const totalCost = poses.reduce((s, p) => s + p.initial_value, 0)
-    const totalPnl = poses.reduce((s, p) => s + p.cash_pnl, 0)
+    const { cashPnl, percentPnl } = pnlStats(totalValue, totalCost)
     out.push({
       key,
       title: cleanMatchupTitle(representative.title),
@@ -1322,8 +1330,8 @@ function groupPositionsByEvent(positions: Position[]): EventGroup[] {
       positions: [...poses].sort((a, b) => b.current_value - a.current_value),
       totalValue,
       totalCost,
-      totalPnl,
-      percentPnl: totalCost > 0 ? (totalPnl / totalCost) * 100 : 0,
+      totalPnl: cashPnl,
+      percentPnl,
     })
   }
   return out.sort((a, b) => b.totalValue - a.totalValue)

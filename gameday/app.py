@@ -799,93 +799,118 @@ def _live_mid_price(token_id: str | None) -> float | None:
     return float(ltp) if ltp else None
 
 
+# ── PnL computation (single source of truth) ───────────────────────────
+#
+# All portfolio P/L arithmetic flows through the helpers below. Read this
+# section before touching any number the UI displays — there should be no
+# pnl formulas anywhere else in the codebase.
+#
+# Definitions:
+#   cash_pnl    = current_value − cost_basis
+#   percent_pnl = cash_pnl / cost_basis × 100  (0 when cost_basis ≤ 0)
+#
+# Open Unrealized P/L (`total_pnl`) is the sum of cash_pnl across open
+# positions, priced at live mid. Resolved-to-zero losers are excluded from
+# the unrealized total (matching Polymarket's profile UI) because their
+# prices no longer move; their sunk cost is reported separately as
+# `resolved_losses`. Realized P/L is always counted, resolved or not.
+#
+# Lifetime P/L is net realized + unrealized across the wallet's history.
+# Polymarket's user-pnl-api returns this as a time series; its last point
+# is authoritative for historical realized + unrealized but updates on a
+# slow backend cadence. We substitute the stale unrealized component with
+# a live mid-price version: live_adjustment = (live_total − api_total)
+# cancels the stale unrealized inside the baseline and replaces it with
+# fresh mark-to-market.
+
 # Positions with cur_price at or below this are treated as resolved-to-zero
 # losing bets. Polymarket's own profile page excludes them from unrealized P/L.
 RESOLVED_PRICE_THRESHOLD = 0.01
 
 
-def _materialize_portfolio(wallet: str) -> dict:
-    """Build portfolio snapshot: open positions overlaid with live prices + totals.
+def _pnl_stats(current_value: float, cost: float) -> tuple[float, float]:
+    """Canonical pnl formulas. Returns (cash_pnl, percent_pnl)."""
+    cash_pnl = current_value - cost
+    percent_pnl = (cash_pnl / cost * 100) if cost > 0 else 0.0
+    return cash_pnl, percent_pnl
 
-    Resolved-to-zero losing positions are excluded from open positions and from
-    unrealized totals (matching Polymarket's profile UI). Their sunk cost is
-    surfaced separately via `resolved_losses` for transparency.
+
+def _compute_position(raw: dict) -> dict:
+    """Materialize one Polymarket position with a live mid-price overlay.
+
+    The result carries display-ready fields plus two internal ones used by
+    portfolio aggregation (`_api_current_value` for the lifetime adjustment
+    and `_is_resolved` to filter settled losers). Callers must strip the
+    underscore-prefixed fields before emitting to clients.
     """
-    cached = _portfolio_cache.get(wallet)
-    if not cached:
-        return {"available": False, "loading": True, "positions": [],
-                "total_value": 0, "total_cost": 0, "total_pnl": 0, "percent_pnl": 0}
+    token_id = raw.get("asset")
+    size = float(raw.get("size", 0) or 0)
+    initial_value = float(raw.get("initialValue", 0) or 0)
+    api_cur_price = float(raw.get("curPrice", 0) or 0)
+    api_current_value = float(raw.get("currentValue", 0) or 0)
 
-    positions_out: list[dict] = []
+    live = _live_mid_price(token_id)
+    cur_price = live if live is not None else api_cur_price
+    current_value = size * cur_price if live is not None else api_current_value
+
+    cash_pnl, percent_pnl = _pnl_stats(current_value, initial_value)
+
+    return {
+        "asset": token_id,
+        "condition_id": raw.get("conditionId"),
+        "title": raw.get("title"),
+        "icon": raw.get("icon"),
+        "event_slug": raw.get("eventSlug"),
+        "outcome": raw.get("outcome"),
+        "size": size,
+        "avg_price": float(raw.get("avgPrice", 0) or 0),
+        "cur_price": cur_price,
+        "initial_value": initial_value,
+        "current_value": current_value,
+        "cash_pnl": cash_pnl,
+        "percent_pnl": percent_pnl,
+        "realized_pnl": float(raw.get("realizedPnl", 0) or 0),
+        "is_live": live is not None,
+        "_api_current_value": api_current_value,
+        "_is_resolved": cur_price < RESOLVED_PRICE_THRESHOLD,
+    }
+
+
+def _compute_portfolio_totals(
+    positions: list[dict],
+    pnl_map: dict[str, list[dict]],
+) -> dict:
+    """Aggregate materialized positions into portfolio totals + lifetime P/L."""
+    open_positions: list[dict] = []
     total_value = 0.0
-    api_total_value = 0.0  # same positions priced at the data-api's stale curPrice
+    api_total_value = 0.0
     total_cost = 0.0
     total_realized = 0.0
     resolved_losses = 0.0
     resolved_count = 0
 
-    for p in cached.get("positions", []):
-        token_id = p.get("asset")
-        size = float(p.get("size", 0) or 0)
-        avg_price = float(p.get("avgPrice", 0) or 0)
-        initial_value = float(p.get("initialValue", 0) or 0)
-        api_cur_price = float(p.get("curPrice", 0) or 0)
-        api_current_value = float(p.get("currentValue", 0) or 0)
-        realized = float(p.get("realizedPnl", 0) or 0)
-
-        live = _live_mid_price(token_id)
-        cur_price = live if live is not None else api_cur_price
-        current_value = size * cur_price if live is not None else api_current_value
-
-        # Always include realized P/L — that's accurate historical data.
-        total_realized += realized
-
-        # Resolved-to-zero: exclude from open positions + unrealized totals.
-        if cur_price < RESOLVED_PRICE_THRESHOLD:
-            resolved_losses += initial_value
+    for p in positions:
+        total_realized += p["realized_pnl"]
+        if p["_is_resolved"]:
+            resolved_losses += p["initial_value"]
             resolved_count += 1
             continue
+        total_value += p["current_value"]
+        api_total_value += p["_api_current_value"]
+        total_cost += p["initial_value"]
+        open_positions.append(p)
 
-        cash_pnl = current_value - initial_value
-        percent_pnl = (cash_pnl / initial_value * 100) if initial_value > 0 else 0.0
-
-        total_value += current_value
-        api_total_value += api_current_value
-        total_cost += initial_value
-
-        positions_out.append({
-            "asset": token_id,
-            "condition_id": p.get("conditionId"),
-            "title": p.get("title"),
-            "icon": p.get("icon"),
-            "event_slug": p.get("eventSlug"),
-            "outcome": p.get("outcome"),
-            "size": size,
-            "avg_price": avg_price,
-            "cur_price": cur_price,
-            "initial_value": initial_value,
-            "current_value": current_value,
-            "cash_pnl": cash_pnl,
-            "percent_pnl": percent_pnl,
-            "realized_pnl": realized,
-            "is_live": live is not None,
-        })
-
-    positions_out.sort(key=lambda x: x["current_value"], reverse=True)
-    total_pnl = total_value - total_cost
-    percent_pnl = (total_pnl / total_cost * 100) if total_cost > 0 else 0.0
-
-    # Lifetime P/L: per-interval time series from Polymarket's user-pnl-api.
-    # The `all` series' final point is Polymarket's net lifetime P/L, but that
-    # endpoint only updates on a slow backend cadence — without adjustment the
-    # big headline number sits frozen while Open Unrealized ticks live. Treat
-    # the cached value as a baseline and swap in the live mid-price unrealized
-    # component: (live total_value − api total_value) cancels the stale
-    # unrealized inside the baseline and replaces it with fresh mark-to-market.
-    pnl_map = _portfolio_pnl_cache.get(wallet, {})
-    all_series = pnl_map.get("all", [])
+    total_pnl, percent_pnl = _pnl_stats(total_value, total_cost)
     live_adjustment = total_value - api_total_value
-    lifetime_pnl = (float(all_series[-1].get("p", 0)) if all_series else 0.0) + live_adjustment
+
+    # Lifetime: prefer Polymarket's authoritative series (with live substitution);
+    # when unavailable, fall back to realized + live unrealized so the headline
+    # is never 0 on a populated wallet.
+    all_series = pnl_map.get("all", [])
+    if all_series:
+        lifetime_pnl = float(all_series[-1].get("p", 0)) + live_adjustment
+    else:
+        lifetime_pnl = total_realized + total_pnl
 
     # Rewrite the tip of each interval series so the chart line reflects the
     # live-adjusted value at "now". Historical points stay as Polymarket
@@ -899,11 +924,14 @@ def _materialize_portfolio(wallet: str) -> dict:
         else:
             pnl_series_out[interval] = raw
 
+    # Strip internal aggregation fields before emitting.
+    open_positions.sort(key=lambda x: x["current_value"], reverse=True)
+    for p in open_positions:
+        del p["_api_current_value"]
+        del p["_is_resolved"]
+
     return {
-        "available": True,
-        "wallet": wallet,
-        "username": cached.get("username"),
-        "positions": positions_out,
+        "positions": open_positions,
         "total_value": total_value,
         "total_cost": total_cost,
         "total_pnl": total_pnl,
@@ -913,7 +941,25 @@ def _materialize_portfolio(wallet: str) -> dict:
         "resolved_count": resolved_count,
         "lifetime_pnl": lifetime_pnl,
         "pnl_series": pnl_series_out,
-        "position_count": len(positions_out),
+    }
+
+
+def _materialize_portfolio(wallet: str) -> dict:
+    """Build portfolio snapshot: open positions overlaid with live prices + totals."""
+    cached = _portfolio_cache.get(wallet)
+    if not cached:
+        return {"available": False, "loading": True, "positions": [],
+                "total_value": 0, "total_cost": 0, "total_pnl": 0, "percent_pnl": 0}
+
+    materialized = [_compute_position(p) for p in cached.get("positions", [])]
+    totals = _compute_portfolio_totals(materialized, _portfolio_pnl_cache.get(wallet, {}))
+
+    return {
+        "available": True,
+        "wallet": wallet,
+        "username": cached.get("username"),
+        **totals,
+        "position_count": len(totals["positions"]),
         "updated_at": cached.get("updated_at"),
     }
 
