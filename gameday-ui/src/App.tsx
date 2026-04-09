@@ -1620,33 +1620,41 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
         {/* Divider */}
         <div className="relative h-px bg-gradient-to-r from-transparent via-border to-transparent mb-8" />
 
-        {/* Lifetime block: dynamic label/number + interactive chart */}
-        <div className="grid grid-cols-1 md:grid-cols-[auto_1fr] gap-6 md:gap-10 items-start">
-          <div className="md:min-w-[240px]">
+        {/* Lifetime block: dynamic label/number + interactive chart.
+            Grid columns are FIXED so the hero number can swap between widths
+            during hover scrubbing without pushing the chart horizontally. */}
+        <div className="grid grid-cols-1 md:grid-cols-[440px_1fr] gap-6 md:gap-8 items-start">
+          <div className="md:w-[440px] overflow-hidden">
             {/* Label line — animates between default and hover state */}
-            <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1 h-3.5">
+            <div className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground mb-1 h-3.5 whitespace-nowrap">
               <span key={shownLabel} className="inline-block animate-[fadeIn_180ms_ease-out]">
                 {shownLabel}
               </span>
             </div>
-            {/* Hero number */}
-            <div className={`text-5xl md:text-7xl font-black tabular-nums leading-[0.9] tracking-tight ${shownColor} transition-colors duration-150`}>
+            {/* Hero number — whitespace-nowrap locks the line so it can't
+                wrap mid-number when the column is tight. The column width is
+                fixed above so the chart to the right never reflows. */}
+            <div className={`text-5xl md:text-6xl font-black tabular-nums leading-[0.9] tracking-tight whitespace-nowrap ${shownColor} transition-colors duration-150`}>
               {shownGain ? "+" : "−"}${Math.abs(shownValue).toLocaleString(undefined, {
                 minimumFractionDigits: 2,
                 maximumFractionDigits: 2,
               })}
             </div>
-            <div className="text-[11px] text-muted-foreground mt-2 tabular-nums">
+            {/* Sub-line reserved at fixed height so vertical stacking stays stable
+                between default and scrubbing states. */}
+            <div className="text-[11px] text-muted-foreground mt-2 tabular-nums min-h-[1.5em]">
               {hoverPoint
                 ? <>Scrubbing · release to resume</>
                 : <>Lifetime net · Polymarket{sinceLabel && <> · since {sinceLabel}</>}</>}
             </div>
-            {!hoverPoint && (p.resolved_count ?? 0) > 0 && (
-              <div className="text-[10px] text-muted-foreground/70 mt-1 tabular-nums">
-                {p.resolved_count} settled
-                {p.resolved_losses ? <> · sunk {formatUsd(p.resolved_losses)}</> : null}
-              </div>
-            )}
+            <div className="text-[10px] text-muted-foreground/70 mt-1 tabular-nums min-h-[1.2em]">
+              {!hoverPoint && (p.resolved_count ?? 0) > 0 && (
+                <>
+                  {p.resolved_count} settled
+                  {p.resolved_losses ? <> · sunk {formatUsd(p.resolved_losses)}</> : null}
+                </>
+              )}
+            </div>
           </div>
 
           {/* Chart column: selector above, chart below, scale rail under */}
