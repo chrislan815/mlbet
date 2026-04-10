@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import datetime
+import re
 import sys
 import time
 import traceback
@@ -39,6 +40,10 @@ POS_CODE_TO_FIELD = {
     "1": "pitcher", "2": "catcher", "3": "first", "4": "second",
     "5": "third", "6": "shortstop", "7": "left", "8": "center", "9": "right",
 }
+
+
+def _to_snake(name: str) -> str:
+    return re.sub(r'([a-z])([A-Z])', r'\1_\2', name).lower()
 
 
 # ── DB connection ────────────────────────────────────────────────────────
@@ -81,112 +86,112 @@ ON CONFLICT ("game_pk") DO UPDATE SET
 
 UPSERT_PLAYER = """
 INSERT INTO player
-    ("id", "fullName", "link", "firstName", "lastName", "birthDate", "currentAge",
-     "birthCity", "birthStateProvince", "birthCountry", "height", "weight", "active",
-     "useName", "useLastName", "middleName", "boxscoreName", "gender",
-     "isPlayer", "isVerified", "draftYear",
-     "batSide_code", "batSide_description",
-     "pitchHand_code", "pitchHand_description",
-     "nameFirstLast", "nameSlug", "firstLastName", "lastFirstName",
-     "lastInitName", "initLastName", "fullFMLName", "fullLFMName",
-     "strikeZoneTop", "strikeZoneBottom",
-     "primaryPosition_code", "primaryPosition_name",
-     "primaryPosition_type", "primaryPosition_abbreviation")
+    ("id", "full_name", "link", "first_name", "last_name", "birth_date", "current_age",
+     "birth_city", "birth_state_province", "birth_country", "height", "weight", "active",
+     "use_name", "use_last_name", "middle_name", "boxscore_name", "gender",
+     "is_player", "is_verified", "draft_year",
+     "bat_side_code", "bat_side_description",
+     "pitch_hand_code", "pitch_hand_description",
+     "name_first_last", "name_slug", "first_last_name", "last_first_name",
+     "last_init_name", "init_last_name", "full_fml_name", "full_lfm_name",
+     "strike_zone_top", "strike_zone_bottom",
+     "primary_position_code", "primary_position_name",
+     "primary_position_type", "primary_position_abbreviation")
 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 ON CONFLICT ("id") DO UPDATE SET
-    "fullName"=EXCLUDED."fullName", "link"=EXCLUDED."link",
-    "firstName"=EXCLUDED."firstName", "lastName"=EXCLUDED."lastName",
-    "birthDate"=EXCLUDED."birthDate", "currentAge"=EXCLUDED."currentAge",
-    "birthCity"=EXCLUDED."birthCity", "birthStateProvince"=EXCLUDED."birthStateProvince",
-    "birthCountry"=EXCLUDED."birthCountry", "height"=EXCLUDED."height",
+    "full_name"=EXCLUDED."full_name", "link"=EXCLUDED."link",
+    "first_name"=EXCLUDED."first_name", "last_name"=EXCLUDED."last_name",
+    "birth_date"=EXCLUDED."birth_date", "current_age"=EXCLUDED."current_age",
+    "birth_city"=EXCLUDED."birth_city", "birth_state_province"=EXCLUDED."birth_state_province",
+    "birth_country"=EXCLUDED."birth_country", "height"=EXCLUDED."height",
     "weight"=EXCLUDED."weight", "active"=EXCLUDED."active",
-    "useName"=EXCLUDED."useName", "useLastName"=EXCLUDED."useLastName",
-    "middleName"=EXCLUDED."middleName", "boxscoreName"=EXCLUDED."boxscoreName",
-    "gender"=EXCLUDED."gender", "isPlayer"=EXCLUDED."isPlayer",
-    "isVerified"=EXCLUDED."isVerified", "draftYear"=EXCLUDED."draftYear",
-    "batSide_code"=EXCLUDED."batSide_code", "batSide_description"=EXCLUDED."batSide_description",
-    "pitchHand_code"=EXCLUDED."pitchHand_code", "pitchHand_description"=EXCLUDED."pitchHand_description",
-    "nameFirstLast"=EXCLUDED."nameFirstLast", "nameSlug"=EXCLUDED."nameSlug",
-    "firstLastName"=EXCLUDED."firstLastName", "lastFirstName"=EXCLUDED."lastFirstName",
-    "lastInitName"=EXCLUDED."lastInitName", "initLastName"=EXCLUDED."initLastName",
-    "fullFMLName"=EXCLUDED."fullFMLName", "fullLFMName"=EXCLUDED."fullLFMName",
-    "strikeZoneTop"=EXCLUDED."strikeZoneTop", "strikeZoneBottom"=EXCLUDED."strikeZoneBottom",
-    "primaryPosition_code"=EXCLUDED."primaryPosition_code",
-    "primaryPosition_name"=EXCLUDED."primaryPosition_name",
-    "primaryPosition_type"=EXCLUDED."primaryPosition_type",
-    "primaryPosition_abbreviation"=EXCLUDED."primaryPosition_abbreviation"
+    "use_name"=EXCLUDED."use_name", "use_last_name"=EXCLUDED."use_last_name",
+    "middle_name"=EXCLUDED."middle_name", "boxscore_name"=EXCLUDED."boxscore_name",
+    "gender"=EXCLUDED."gender", "is_player"=EXCLUDED."is_player",
+    "is_verified"=EXCLUDED."is_verified", "draft_year"=EXCLUDED."draft_year",
+    "bat_side_code"=EXCLUDED."bat_side_code", "bat_side_description"=EXCLUDED."bat_side_description",
+    "pitch_hand_code"=EXCLUDED."pitch_hand_code", "pitch_hand_description"=EXCLUDED."pitch_hand_description",
+    "name_first_last"=EXCLUDED."name_first_last", "name_slug"=EXCLUDED."name_slug",
+    "first_last_name"=EXCLUDED."first_last_name", "last_first_name"=EXCLUDED."last_first_name",
+    "last_init_name"=EXCLUDED."last_init_name", "init_last_name"=EXCLUDED."init_last_name",
+    "full_fml_name"=EXCLUDED."full_fml_name", "full_lfm_name"=EXCLUDED."full_lfm_name",
+    "strike_zone_top"=EXCLUDED."strike_zone_top", "strike_zone_bottom"=EXCLUDED."strike_zone_bottom",
+    "primary_position_code"=EXCLUDED."primary_position_code",
+    "primary_position_name"=EXCLUDED."primary_position_name",
+    "primary_position_type"=EXCLUDED."primary_position_type",
+    "primary_position_abbreviation"=EXCLUDED."primary_position_abbreviation"
 """
 
 UPSERT_ATBAT = """
 INSERT INTO atbat
-    ("game_pk", "result_type", "result_event", "result_eventType", "result_description",
-     "result_rbi", "result_awayScore", "result_homeScore", "result_isOut",
-     "about_atBatIndex", "about_halfInning", "about_isTopInning", "about_inning",
-     "about_startTime", "about_endTime", "about_isComplete",
-     "about_isScoringPlay", "about_hasReview", "about_hasOut", "about_captivatingIndex",
+    ("game_pk", "result_type", "result_event", "result_event_type", "result_description",
+     "result_rbi", "result_away_score", "result_home_score", "result_is_out",
+     "about_at_bat_index", "about_half_inning", "about_is_top_inning", "about_inning",
+     "about_start_time", "about_end_time", "about_is_complete",
+     "about_is_scoring_play", "about_has_review", "about_has_out", "about_captivating_index",
      "count_balls", "count_strikes", "count_outs",
-     "matchup_batter_id", "matchup_batter_fullName", "matchup_batter_link",
-     "matchup_batSide_code", "matchup_batSide_description",
-     "matchup_pitcher_id", "matchup_pitcher_fullName", "matchup_pitcher_link",
-     "matchup_pitchHand_code", "matchup_pitchHand_description",
-     "matchup_splits_batter", "matchup_splits_pitcher", "matchup_splits_menOnBase",
-     "homeTeamWinProbability", "homeTeamWinProbabilityAdded",
-     "playEndTime", "pitchIndex", "actionIndex", "runnerIndex")
+     "matchup_batter_id", "matchup_batter_full_name", "matchup_batter_link",
+     "matchup_bat_side_code", "matchup_bat_side_description",
+     "matchup_pitcher_id", "matchup_pitcher_full_name", "matchup_pitcher_link",
+     "matchup_pitch_hand_code", "matchup_pitch_hand_description",
+     "matchup_splits_batter", "matchup_splits_pitcher", "matchup_splits_men_on_base",
+     "home_team_win_probability", "home_team_win_probability_added",
+     "play_end_time", "pitch_index", "action_index", "runner_index")
 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-ON CONFLICT ("game_pk", "about_atBatIndex") DO UPDATE SET
+ON CONFLICT ("game_pk", "about_at_bat_index") DO UPDATE SET
     "result_type"=EXCLUDED."result_type", "result_event"=EXCLUDED."result_event",
-    "result_eventType"=EXCLUDED."result_eventType", "result_description"=EXCLUDED."result_description",
-    "result_rbi"=EXCLUDED."result_rbi", "result_awayScore"=EXCLUDED."result_awayScore",
-    "result_homeScore"=EXCLUDED."result_homeScore", "result_isOut"=EXCLUDED."result_isOut",
-    "about_halfInning"=EXCLUDED."about_halfInning", "about_isTopInning"=EXCLUDED."about_isTopInning",
-    "about_inning"=EXCLUDED."about_inning", "about_startTime"=EXCLUDED."about_startTime",
-    "about_endTime"=EXCLUDED."about_endTime", "about_isComplete"=EXCLUDED."about_isComplete",
-    "about_isScoringPlay"=EXCLUDED."about_isScoringPlay", "about_hasReview"=EXCLUDED."about_hasReview",
-    "about_hasOut"=EXCLUDED."about_hasOut", "about_captivatingIndex"=EXCLUDED."about_captivatingIndex",
+    "result_event_type"=EXCLUDED."result_event_type", "result_description"=EXCLUDED."result_description",
+    "result_rbi"=EXCLUDED."result_rbi", "result_away_score"=EXCLUDED."result_away_score",
+    "result_home_score"=EXCLUDED."result_home_score", "result_is_out"=EXCLUDED."result_is_out",
+    "about_half_inning"=EXCLUDED."about_half_inning", "about_is_top_inning"=EXCLUDED."about_is_top_inning",
+    "about_inning"=EXCLUDED."about_inning", "about_start_time"=EXCLUDED."about_start_time",
+    "about_end_time"=EXCLUDED."about_end_time", "about_is_complete"=EXCLUDED."about_is_complete",
+    "about_is_scoring_play"=EXCLUDED."about_is_scoring_play", "about_has_review"=EXCLUDED."about_has_review",
+    "about_has_out"=EXCLUDED."about_has_out", "about_captivating_index"=EXCLUDED."about_captivating_index",
     "count_balls"=EXCLUDED."count_balls", "count_strikes"=EXCLUDED."count_strikes",
     "count_outs"=EXCLUDED."count_outs",
-    "matchup_batter_id"=EXCLUDED."matchup_batter_id", "matchup_batter_fullName"=EXCLUDED."matchup_batter_fullName",
+    "matchup_batter_id"=EXCLUDED."matchup_batter_id", "matchup_batter_full_name"=EXCLUDED."matchup_batter_full_name",
     "matchup_batter_link"=EXCLUDED."matchup_batter_link",
-    "matchup_batSide_code"=EXCLUDED."matchup_batSide_code", "matchup_batSide_description"=EXCLUDED."matchup_batSide_description",
-    "matchup_pitcher_id"=EXCLUDED."matchup_pitcher_id", "matchup_pitcher_fullName"=EXCLUDED."matchup_pitcher_fullName",
+    "matchup_bat_side_code"=EXCLUDED."matchup_bat_side_code", "matchup_bat_side_description"=EXCLUDED."matchup_bat_side_description",
+    "matchup_pitcher_id"=EXCLUDED."matchup_pitcher_id", "matchup_pitcher_full_name"=EXCLUDED."matchup_pitcher_full_name",
     "matchup_pitcher_link"=EXCLUDED."matchup_pitcher_link",
-    "matchup_pitchHand_code"=EXCLUDED."matchup_pitchHand_code", "matchup_pitchHand_description"=EXCLUDED."matchup_pitchHand_description",
+    "matchup_pitch_hand_code"=EXCLUDED."matchup_pitch_hand_code", "matchup_pitch_hand_description"=EXCLUDED."matchup_pitch_hand_description",
     "matchup_splits_batter"=EXCLUDED."matchup_splits_batter", "matchup_splits_pitcher"=EXCLUDED."matchup_splits_pitcher",
-    "matchup_splits_menOnBase"=EXCLUDED."matchup_splits_menOnBase",
-    "homeTeamWinProbability"=EXCLUDED."homeTeamWinProbability",
-    "homeTeamWinProbabilityAdded"=EXCLUDED."homeTeamWinProbabilityAdded",
-    "playEndTime"=EXCLUDED."playEndTime", "pitchIndex"=EXCLUDED."pitchIndex",
-    "actionIndex"=EXCLUDED."actionIndex", "runnerIndex"=EXCLUDED."runnerIndex"
+    "matchup_splits_men_on_base"=EXCLUDED."matchup_splits_men_on_base",
+    "home_team_win_probability"=EXCLUDED."home_team_win_probability",
+    "home_team_win_probability_added"=EXCLUDED."home_team_win_probability_added",
+    "play_end_time"=EXCLUDED."play_end_time", "pitch_index"=EXCLUDED."pitch_index",
+    "action_index"=EXCLUDED."action_index", "runner_index"=EXCLUDED."runner_index"
 """
 
 _PE_COLS = [
-    "game_pk", "about_atBatIndex",
+    "game_pk", "about_at_bat_index",
     "details_call_code", "details_call_description", "details_description",
-    "details_code", "details_ballColor", "details_trailColor",
-    "details_isInPlay", "details_isStrike", "details_isBall",
+    "details_code", "details_ball_color", "details_trail_color",
+    "details_is_in_play", "details_is_strike", "details_is_ball",
     "details_type_code", "details_type_description",
-    "details_isOut", "details_hasReview",
+    "details_is_out", "details_has_review",
     "count_balls", "count_strikes", "count_outs",
-    "preCount_balls", "preCount_strikes", "preCount_outs",
-    "pitchData_startSpeed", "pitchData_endSpeed",
-    "pitchData_strikeZoneTop", "pitchData_strikeZoneBottom",
-    "pitchData_coordinates_aY", "pitchData_coordinates_aZ",
-    "pitchData_coordinates_pfxX", "pitchData_coordinates_pfxZ",
-    "pitchData_coordinates_pX", "pitchData_coordinates_pZ",
-    "pitchData_coordinates_vX0", "pitchData_coordinates_vY0", "pitchData_coordinates_vZ0",
-    "pitchData_coordinates_x", "pitchData_coordinates_y",
-    "pitchData_coordinates_x0", "pitchData_coordinates_y0", "pitchData_coordinates_z0",
-    "pitchData_coordinates_aX",
-    "pitchData_breaks_breakAngle", "pitchData_breaks_breakLength",
-    "pitchData_breaks_breakY",
-    "pitchData_breaks_breakVertical", "pitchData_breaks_breakVerticalInduced",
-    "pitchData_breaks_breakHorizontal",
-    "pitchData_breaks_spinRate", "pitchData_breaks_spinDirection",
-    "pitchData_zone", "pitchData_typeConfidence",
-    "pitchData_plateTime", "pitchData_extension",
-    "index", "playId", "pitchNumber", "startTime", "endTime", "isPitch", "type",
+    "pre_count_balls", "pre_count_strikes", "pre_count_outs",
+    "pitch_data_start_speed", "pitch_data_end_speed",
+    "pitch_data_strike_zone_top", "pitch_data_strike_zone_bottom",
+    "pitch_data_coordinates_a_y", "pitch_data_coordinates_a_z",
+    "pitch_data_coordinates_pfx_x", "pitch_data_coordinates_pfx_z",
+    "pitch_data_coordinates_p_x", "pitch_data_coordinates_p_z",
+    "pitch_data_coordinates_v_x0", "pitch_data_coordinates_v_y0", "pitch_data_coordinates_v_z0",
+    "pitch_data_coordinates_x", "pitch_data_coordinates_y",
+    "pitch_data_coordinates_x0", "pitch_data_coordinates_y0", "pitch_data_coordinates_z0",
+    "pitch_data_coordinates_a_x",
+    "pitch_data_breaks_break_angle", "pitch_data_breaks_break_length",
+    "pitch_data_breaks_break_y",
+    "pitch_data_breaks_break_vertical", "pitch_data_breaks_break_vertical_induced",
+    "pitch_data_breaks_break_horizontal",
+    "pitch_data_breaks_spin_rate", "pitch_data_breaks_spin_direction",
+    "pitch_data_zone", "pitch_data_type_confidence",
+    "pitch_data_plate_time", "pitch_data_extension",
+    "index", "play_id", "pitch_number", "start_time", "end_time", "is_pitch", "type",
     "defense_pitcher_id", "defense_pitcher_link",
-    "defense_pitcher_pitchHand_code", "defense_pitcher_pitchHand_description",
+    "defense_pitcher_pitch_hand_code", "defense_pitcher_pitch_hand_description",
     "defense_catcher_id", "defense_catcher_link",
     "defense_first_id", "defense_first_link",
     "defense_second_id", "defense_second_link",
@@ -196,18 +201,18 @@ _PE_COLS = [
     "defense_center_id", "defense_center_link",
     "defense_right_id", "defense_right_link",
     "offense_batter_id", "offense_batter_link",
-    "offense_batter_batSide_code", "offense_batter_batSide_description",
-    "offense_batterPosition_code", "offense_batterPosition_name",
-    "offense_batterPosition_type", "offense_batterPosition_abbreviation",
+    "offense_batter_bat_side_code", "offense_batter_bat_side_description",
+    "offense_batter_position_code", "offense_batter_position_name",
+    "offense_batter_position_type", "offense_batter_position_abbreviation",
     "offense_first_id", "offense_first_link",
     "offense_second_id", "offense_second_link",
     "offense_third_id", "offense_third_link",
-    "hitData_launchSpeed", "hitData_launchAngle", "hitData_totalDistance",
-    "hitData_trajectory", "hitData_hardness", "hitData_location",
-    "hitData_coordinates_coordX", "hitData_coordinates_coordY",
+    "hit_data_launch_speed", "hit_data_launch_angle", "hit_data_total_distance",
+    "hit_data_trajectory", "hit_data_hardness", "hit_data_location",
+    "hit_data_coordinates_coord_x", "hit_data_coordinates_coord_y",
 ]
 
-_PE_PK = ["game_pk", "about_atBatIndex", "pitchNumber"]
+_PE_PK = ["game_pk", "about_at_bat_index", "pitch_number"]
 _PE_NON_PK = [c for c in _PE_COLS if c not in _PE_PK]
 
 UPSERT_PLAY_EVENT = """
@@ -224,41 +229,41 @@ ON CONFLICT ({pk}) DO UPDATE SET
 
 UPSERT_RUNNER = """
 INSERT INTO runner
-    ("game_pk", "about_atBatIndex",
-     "movement_originBase", "movement_start", "movement_end",
-     "movement_outBase", "movement_isOut", "movement_outNumber",
-     "details_event", "details_eventType", "details_movementReason",
-     "details_isScoringEvent", "details_rbi", "details_earned",
-     "details_teamUnearned", "details_playIndex",
-     "runner_id", "runner_fullName", "runner_link")
+    ("game_pk", "about_at_bat_index",
+     "movement_origin_base", "movement_start", "movement_end",
+     "movement_out_base", "movement_is_out", "movement_out_number",
+     "details_event", "details_event_type", "details_movement_reason",
+     "details_is_scoring_event", "details_rbi", "details_earned",
+     "details_team_unearned", "details_play_index",
+     "runner_id", "runner_full_name", "runner_link")
 VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
-ON CONFLICT ("game_pk", "about_atBatIndex", "runner_id") DO UPDATE SET
-    "movement_originBase"=EXCLUDED."movement_originBase",
+ON CONFLICT ("game_pk", "about_at_bat_index", "runner_id") DO UPDATE SET
+    "movement_origin_base"=EXCLUDED."movement_origin_base",
     "movement_start"=EXCLUDED."movement_start", "movement_end"=EXCLUDED."movement_end",
-    "movement_outBase"=EXCLUDED."movement_outBase", "movement_isOut"=EXCLUDED."movement_isOut",
-    "movement_outNumber"=EXCLUDED."movement_outNumber",
-    "details_event"=EXCLUDED."details_event", "details_eventType"=EXCLUDED."details_eventType",
-    "details_movementReason"=EXCLUDED."details_movementReason",
-    "details_isScoringEvent"=EXCLUDED."details_isScoringEvent",
+    "movement_out_base"=EXCLUDED."movement_out_base", "movement_is_out"=EXCLUDED."movement_is_out",
+    "movement_out_number"=EXCLUDED."movement_out_number",
+    "details_event"=EXCLUDED."details_event", "details_event_type"=EXCLUDED."details_event_type",
+    "details_movement_reason"=EXCLUDED."details_movement_reason",
+    "details_is_scoring_event"=EXCLUDED."details_is_scoring_event",
     "details_rbi"=EXCLUDED."details_rbi", "details_earned"=EXCLUDED."details_earned",
-    "details_teamUnearned"=EXCLUDED."details_teamUnearned",
-    "details_playIndex"=EXCLUDED."details_playIndex",
-    "runner_fullName"=EXCLUDED."runner_fullName", "runner_link"=EXCLUDED."runner_link"
+    "details_team_unearned"=EXCLUDED."details_team_unearned",
+    "details_play_index"=EXCLUDED."details_play_index",
+    "runner_full_name"=EXCLUDED."runner_full_name", "runner_link"=EXCLUDED."runner_link"
 """
 
 UPSERT_LINEUP = """
 INSERT INTO lineup
     ("game_pk", "team_type", "batting_order", "player_id", "player_name", "player_link",
      "parent_team_id", "position_code", "position_abbreviation", "position_name",
-     "position_type", "parentTeamId")
-VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+     "position_type")
+VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
 ON CONFLICT ("game_pk", "batting_order", "player_id") DO UPDATE SET
     "team_type"=EXCLUDED."team_type",
     "player_name"=EXCLUDED."player_name", "player_link"=EXCLUDED."player_link",
     "parent_team_id"=EXCLUDED."parent_team_id",
-    "position_code"=EXCLUDED."position_code", "position_abbreviation"=EXCLUDED."position_abbreviation",
-    "position_name"=EXCLUDED."position_name", "position_type"=EXCLUDED."position_type",
-    "parentTeamId"=EXCLUDED."parentTeamId"
+    "position_code"=EXCLUDED."position_code",
+    "position_abbreviation"=EXCLUDED."position_abbreviation",
+    "position_name"=EXCLUDED."position_name", "position_type"=EXCLUDED."position_type"
 """
 
 UPSERT_VENUE = """
@@ -370,8 +375,8 @@ def _extract_starting_defense(team_box, game_data_players):
             defense[f"{field_name}_link"] = person.get("link")
             if pos_code == "1":
                 p_info = game_data_players.get(f"ID{player_id}", {})
-                defense["pitcher_pitchHand_code"] = p_info.get("pitchHand", {}).get("code")
-                defense["pitcher_pitchHand_description"] = p_info.get("pitchHand", {}).get("description")
+                defense["pitcher_pitch_hand_code"] = p_info.get("pitchHand", {}).get("code")
+                defense["pitcher_pitch_hand_description"] = p_info.get("pitchHand", {}).get("description")
     return defense
 
 
@@ -402,8 +407,8 @@ def _update_defense_from_event(defense, event, game_data, is_top):
         if pos_code == "1":
             gd_players = game_data.get("gameData", {}).get("players", {})
             p_info = gd_players.get(f"ID{player_id}", {})
-            defense["pitcher_pitchHand_code"] = p_info.get("pitchHand", {}).get("code")
-            defense["pitcher_pitchHand_description"] = p_info.get("pitchHand", {}).get("description")
+            defense["pitcher_pitch_hand_code"] = p_info.get("pitchHand", {}).get("code")
+            defense["pitcher_pitch_hand_description"] = p_info.get("pitchHand", {}).get("description")
 
 
 def build_defense_timeline(game_data):
@@ -602,7 +607,7 @@ def extract_play_events(game_pk, game_data, defense_timeline):
                 ev.get("startTime"), ev.get("endTime"),
                 ev.get("isPitch"), ev.get("type"),
                 defense.get("pitcher_id"), defense.get("pitcher_link"),
-                defense.get("pitcher_pitchHand_code"), defense.get("pitcher_pitchHand_description"),
+                defense.get("pitcher_pitch_hand_code"), defense.get("pitcher_pitch_hand_description"),
                 defense.get("catcher_id"), defense.get("catcher_link"),
                 defense.get("first_id"), defense.get("first_link"),
                 defense.get("second_id"), defense.get("second_link"),
@@ -661,7 +666,7 @@ def extract_lineups(game_pk, game_data):
                 str(game_pk), team_type, order, pid,
                 person.get("fullName", ""), person.get("link"),
                 team_id, pos.get("code"), pos.get("abbreviation"),
-                pos.get("name"), pos.get("type"), team_id,
+                pos.get("name"), pos.get("type"),
             )
 
 
