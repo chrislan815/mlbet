@@ -813,17 +813,25 @@ async def _poll_odds_loop(game_pk: int):
             if not game_state:
                 row = await _fetchrow(
                     'SELECT home_team_name, away_team_name, status, game_date FROM game WHERE game_pk = $1', game_pk)
-                if not row:
-                    await asyncio.sleep(POLYMARKET_POLL)
-                    continue
-                home, away = row["home_team_name"], row["away_team_name"]
-                game_date = str(row["game_date"])
+                if row:
+                    home, away = row["home_team_name"], row["away_team_name"]
+                    game_date = str(row["game_date"])
+                else:
+                    # Game not in DB — try building from API to populate cache
+                    game_state = await _build_game_state_from_api(game_pk)
+                    if not game_state:
+                        await asyncio.sleep(POLYMARKET_POLL)
+                        continue
+                    _game_cache[game_pk] = game_state
+                    home = game_state["game"]["home_team_name"]
+                    away = game_state["game"]["away_team_name"]
+                    game_date = datetime.now().strftime("%Y-%m-%d")
             else:
                 home = game_state["game"]["home_team_name"]
                 away = game_state["game"]["away_team_name"]
                 if game_pk not in _poly_slug_cache:
                     row = await _fetchrow('SELECT game_date FROM game WHERE game_pk = $1', game_pk)
-                    game_date = str(row["game_date"]) if row else None
+                    game_date = str(row["game_date"]) if row else datetime.now().strftime("%Y-%m-%d")
                 else:
                     game_date = None  # slug already cached
 
