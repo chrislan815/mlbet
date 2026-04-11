@@ -63,15 +63,15 @@ function Scoreboard({ game }: { game: GameInfo }) {
       <CardContent className="p-6">
         <div className="flex items-center justify-center gap-8">
           <div className="text-center min-w-[120px]">
-            <div className="text-sm text-foreground/70 uppercase tracking-widest font-semibold">{game.away_team_name}</div>
-            <div className="text-5xl font-black tabular-nums mt-1">{game.away_score}</div>
+            <div className="text-sm text-[#5e5d59] uppercase tracking-widest font-semibold">{game.away_team_name}</div>
+            <div className="text-5xl font-black tabular-nums mt-1 text-[#141413]">{game.away_score}</div>
           </div>
           <div className="flex flex-col items-center gap-2">
             <Badge variant={isLive ? "live" : isFinal ? "final" : "secondary"}>
               {isLive ? "LIVE" : game.status}
             </Badge>
             {isLive && (
-              <div className="text-lg font-semibold">
+              <div className="text-lg font-semibold text-[#c96442]">
                 {arrow} {ordinal(game.current_inning)}
               </div>
             )}
@@ -81,8 +81,8 @@ function Scoreboard({ game }: { game: GameInfo }) {
             <div className="text-xs text-muted-foreground">{game.venue_name}</div>
           </div>
           <div className="text-center min-w-[120px]">
-            <div className="text-sm text-foreground/70 uppercase tracking-widest font-semibold">{game.home_team_name}</div>
-            <div className="text-5xl font-black tabular-nums mt-1">{game.home_score}</div>
+            <div className="text-sm text-[#5e5d59] uppercase tracking-widest font-semibold">{game.home_team_name}</div>
+            <div className="text-5xl font-black tabular-nums mt-1 text-[#141413]">{game.home_score}</div>
           </div>
         </div>
       </CardContent>
@@ -156,20 +156,20 @@ function StrikeZone({ pitches }: { pitches: Pitch[] }) {
       <svg ref={svgRef} viewBox="-2 0 4 5" className="w-full max-w-[260px]">
         {/* Zone */}
         <rect x={-half} y={5 - szTop} width={plateW} height={szTop - szBottom}
-          fill="none" stroke="white" strokeWidth={0.02} />
+          fill="none" stroke="#4d4c48" strokeWidth={0.02} />
         {/* Grid */}
         {[1, 2].map((i) => (
           <g key={i}>
             <line x1={-half + (plateW / 3) * i} y1={5 - szTop} x2={-half + (plateW / 3) * i} y2={5 - szBottom}
-              stroke="rgba(255,255,255,0.12)" strokeWidth={0.01} />
+              stroke="rgba(77,76,72,0.15)" strokeWidth={0.01} />
             <line x1={-half} y1={5 - szTop + ((szTop - szBottom) / 3) * i} x2={half} y2={5 - szTop + ((szTop - szBottom) / 3) * i}
-              stroke="rgba(255,255,255,0.12)" strokeWidth={0.01} />
+              stroke="rgba(77,76,72,0.15)" strokeWidth={0.01} />
           </g>
         ))}
         {/* Plate */}
         <polygon
           points={`${-half},${5 - szBottom + 0.25} ${-half},${5 - szBottom + 0.45} 0,${5 - szBottom + 0.6} ${half},${5 - szBottom + 0.45} ${half},${5 - szBottom + 0.25}`}
-          fill="none" stroke="rgba(255,255,255,0.25)" strokeWidth={0.015}
+          fill="none" stroke="rgba(77,76,72,0.3)" strokeWidth={0.015}
         />
         {/* Pitches */}
         {pitches.map((p) => {
@@ -179,12 +179,12 @@ function StrikeZone({ pitches }: { pitches: Pitch[] }) {
             <g key={p.num}>
               <circle cx={p.pX} cy={5 - p.pZ} r={0.08} fill={color}
                 stroke="rgba(0,0,0,0.5)" strokeWidth={0.015}
-                className="cursor-pointer hover:stroke-white hover:stroke-[0.03]"
+                className="cursor-pointer hover:stroke-[#141413] hover:stroke-[0.03]"
                 onMouseEnter={(e) => handleMouse(p, e)}
                 onMouseLeave={() => setTooltip(null)}
               />
               <text x={p.pX} y={5 - p.pZ} textAnchor="middle" dominantBaseline="central"
-                fill="white" fontSize={0.1} fontWeight={700} className="pointer-events-none">
+                fill="#141413" fontSize={0.1} fontWeight={700} className="pointer-events-none">
                 {p.num}
               </text>
             </g>
@@ -192,7 +192,7 @@ function StrikeZone({ pitches }: { pitches: Pitch[] }) {
         })}
       </svg>
       {tooltip && (
-        <div className="absolute z-10 bg-black/90 text-white text-xs rounded-lg px-3 py-2 pointer-events-none whitespace-nowrap"
+        <div className="absolute z-10 bg-[#141413] text-[#faf9f5] text-xs rounded-lg px-3 py-2 pointer-events-none whitespace-nowrap shadow-[0px_0px_0px_1px_#30302e]"
           style={{ left: tooltip.x, top: tooltip.y }}>
           <div className="font-bold">#{tooltip.pitch.num} {tooltip.pitch.type_desc || tooltip.pitch.type_code}</div>
           <div>{tooltip.pitch.speed?.toFixed(1)} mph · {tooltip.pitch.call}</div>
@@ -209,19 +209,19 @@ function StrikeZone({ pitches }: { pitches: Pitch[] }) {
 // ── Diamond ──────────────────────────────────────
 function Diamond({ runners }: { runners: Runners }) {
   const baseClass = (occupied: boolean) =>
-    `transition-colors duration-300 ${occupied ? "fill-yellow-400 stroke-yellow-400" : "fill-secondary stroke-white/30"}`
+    `transition-colors duration-300 ${occupied ? "fill-[#c96442] stroke-[#c96442]" : "fill-secondary stroke-[#87867f]/40"}`
 
   return (
     <div className="flex flex-col items-center">
       <svg viewBox="0 0 100 100" className="w-full max-w-[160px]">
-        <path d="M50,82 L78,50 L50,18 L22,50 Z" fill="none" stroke="rgba(255,255,255,0.1)" strokeWidth={1} />
+        <path d="M50,82 L78,50 L50,18 L22,50 Z" fill="none" stroke="rgba(77,76,72,0.15)" strokeWidth={1} />
         <rect x={44} y={12} width={12} height={12} rx={1} transform="rotate(45,50,18)"
           className={baseClass(!!runners.second)} strokeWidth={2} />
         <rect x={16} y={44} width={12} height={12} rx={1} transform="rotate(45,22,50)"
           className={baseClass(!!runners.third)} strokeWidth={2} />
         <rect x={72} y={44} width={12} height={12} rx={1} transform="rotate(45,78,50)"
           className={baseClass(!!runners.first)} strokeWidth={2} />
-        <polygon points="50,79 54,84 50,89 46,84" fill="rgba(255,255,255,0.2)" />
+        <polygon points="50,79 54,84 50,89 46,84" fill="rgba(77,76,72,0.25)" />
       </svg>
       <div className="text-xs text-muted-foreground space-y-0.5 mt-1">
         {runners.first && <div>1B: {runners.first.name}</div>}
@@ -240,7 +240,7 @@ function CountDisplay({ count }: { count: Count }) {
         <span className="text-xs font-bold text-muted-foreground w-3">B</span>
         {[0, 1, 2, 3].map((i) => (
           <div key={i} className={`w-3.5 h-3.5 rounded-full border-2 transition-colors duration-200 ${
-            i < count.balls ? "bg-emerald-400 border-emerald-400" : "border-muted-foreground/40"
+            i < count.balls ? "bg-emerald-600 border-emerald-600" : "border-muted-foreground/40"
           }`} />
         ))}
       </div>
@@ -248,7 +248,7 @@ function CountDisplay({ count }: { count: Count }) {
         <span className="text-xs font-bold text-muted-foreground w-3">S</span>
         {[0, 1].map((i) => (
           <div key={i} className={`w-3.5 h-3.5 rounded-full border-2 transition-colors duration-200 ${
-            i < count.strikes ? "bg-red-300 border-red-300" : "border-muted-foreground/40"
+            i < count.strikes ? "bg-[#b53333] border-red-300" : "border-muted-foreground/40"
           }`} />
         ))}
       </div>
@@ -256,7 +256,7 @@ function CountDisplay({ count }: { count: Count }) {
         <span className="text-xs font-bold text-muted-foreground w-3">O</span>
         {[0, 1].map((i) => (
           <div key={i} className={`w-3.5 h-3.5 rounded-full border-2 transition-colors duration-200 ${
-            i < count.outs ? "bg-yellow-400 border-yellow-400" : "border-muted-foreground/40"
+            i < count.outs ? "bg-[#c96442] border-[#c96442]" : "border-muted-foreground/40"
           }`} />
         ))}
       </div>
@@ -336,7 +336,7 @@ function PlayByPlay({ plays }: { plays: Play[] }) {
   return (
     <div className="max-h-[320px] overflow-y-auto space-y-0">
       {plays.map((p) => (
-        <div key={p.atBatIndex} className={`px-4 py-3 border-b border-border/50 ${p.is_scoring ? "border-l-2 border-l-yellow-400" : ""}`}>
+        <div key={p.atBatIndex} className={`px-4 py-3 border-b border-border/50 ${p.is_scoring ? "border-l-2 border-l-[#c96442]" : ""}`}>
           <div className="flex justify-between items-center mb-1">
             <span className="text-xs text-muted-foreground">
               {p.is_top ? "Top" : "Bot"} {ordinal(p.inning)}
@@ -431,9 +431,9 @@ function OrderBookDisplay({ book }: { book: OrderBook | null }) {
     const barWidth = (level.notional / maxNotional) * 100
     const isDust = level.notional < DUST_NOTIONAL
     const rowOpacity = isDust && !isBest ? "opacity-40" : "opacity-100"
-    const barClass = side === "ask" ? "bg-red-300/15" : "bg-emerald-500/15"
-    const textClass = side === "ask" ? "text-red-300" : "text-emerald-400"
-    const markerClass = side === "ask" ? "bg-red-300" : "bg-emerald-400"
+    const barClass = side === "ask" ? "bg-[#b53333]/10" : "bg-emerald-700/10"
+    const textClass = side === "ask" ? "text-[#b53333]" : "text-emerald-700"
+    const markerClass = side === "ask" ? "bg-[#b53333]" : "bg-emerald-700"
     return (
       <div
         key={key}
@@ -543,13 +543,13 @@ function OrderSlip({ market, outcomeIdx, home, away, gamePk, onSwitchOutcome }: 
           <button
             onClick={() => setSide("buy")}
             className={`flex-1 pb-2 text-sm font-medium cursor-pointer transition-colors ${
-              side === "buy" ? "text-white border-b-2 border-white" : "text-muted-foreground hover:text-foreground"
+              side === "buy" ? "text-[#141413] border-b-2 border-[#c96442]" : "text-muted-foreground hover:text-foreground"
             }`}
           >Buy</button>
           <button
             onClick={() => setSide("sell")}
             className={`flex-1 pb-2 text-sm font-medium cursor-pointer transition-colors ${
-              side === "sell" ? "text-white border-b-2 border-white" : "text-muted-foreground hover:text-foreground"
+              side === "sell" ? "text-[#141413] border-b-2 border-[#c96442]" : "text-muted-foreground hover:text-foreground"
             }`}
           >Sell</button>
         </div>
@@ -562,7 +562,7 @@ function OrderSlip({ market, outcomeIdx, home, away, gamePk, onSwitchOutcome }: 
             const lineLabel = market.line != null ? ` ${i === 0 ? (market.line > 0 ? "+" : "") : (market.line > 0 ? "-" : "+")}${Math.abs(market.line)}` : ""
             const colorCls = isActive
               ? getOutcomeColor(market, i, true)
-              : "bg-[#1e1e2e] border-white/[0.06] text-muted-foreground"
+              : "bg-[#f0eee6] border-[#e8e6dc] text-muted-foreground"
             return (
               <button
                 key={i}
@@ -584,12 +584,12 @@ function OrderSlip({ market, outcomeIdx, home, away, gamePk, onSwitchOutcome }: 
               <button
                 key={v}
                 onClick={() => setAmount(String((parseFloat(amount) || 0) + v))}
-                className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-[#1e1e2e] border border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-[#252538] cursor-pointer transition-colors tabular-nums"
+                className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-[#f0eee6] border border-[#e8e6dc] text-muted-foreground hover:text-foreground hover:bg-[#e8e6dc] cursor-pointer transition-colors tabular-nums"
               >+${v >= 1000 ? `${v/1000}K` : v}</button>
             ))}
             <button
               onClick={() => setAmount("")}
-              className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-[#1e1e2e] border border-white/[0.06] text-muted-foreground hover:text-foreground hover:bg-[#252538] cursor-pointer transition-colors"
+              className="flex-1 py-1.5 rounded-lg text-xs font-medium bg-[#f0eee6] border border-[#e8e6dc] text-muted-foreground hover:text-foreground hover:bg-[#e8e6dc] cursor-pointer transition-colors"
             >Clear</button>
           </div>
         </div>
@@ -607,7 +607,7 @@ function OrderSlip({ market, outcomeIdx, home, away, gamePk, onSwitchOutcome }: 
             </div>
             <div className="flex justify-between">
               <span>Potential return</span>
-              <span className="tabular-nums font-bold text-emerald-400">${payout.toFixed(2)}{price > 0 ? ` (${((1 / price - 1) * 100).toFixed(0)}%)` : ""}</span>
+              <span className="tabular-nums font-bold text-emerald-700">${payout.toFixed(2)}{price > 0 ? ` (${((1 / price - 1) * 100).toFixed(0)}%)` : ""}</span>
             </div>
           </div>
         )}
@@ -637,8 +637,8 @@ function OrderSlip({ market, outcomeIdx, home, away, gamePk, onSwitchOutcome }: 
               setAmount("")
             } catch {}
           }}
-          className={`w-full py-3 rounded-lg text-sm font-bold text-white transition-colors ${
-            amountNum > 0 ? "bg-[#3b82f6] hover:bg-[#3b82f6]/90 cursor-pointer" : "bg-[#3b82f6]/40 cursor-not-allowed"
+          className={`w-full py-3 rounded-lg text-sm font-bold text-[#faf9f5] transition-colors ${
+            amountNum > 0 ? "bg-[#c96442] hover:bg-[#d97757] cursor-pointer" : "bg-[#c96442]/40 cursor-not-allowed"
           }`}
         >
           Place Order
@@ -663,20 +663,20 @@ function getOutcomeAccentColor(market: Market, idx: number): string {
 
 // ── Market Section ──────────────────────────────
 function getOutcomeColor(market: Market, idx: number, isSelected: boolean): string {
-  if (!isSelected) return "bg-[#1e1e2e] border-white/[0.08] text-foreground/80 hover:bg-[#252538]"
-  if (market.type === "moneyline") return "bg-[#2d2d3d] border-white/20 text-white"
-  if (market.type === "spread") return "bg-[#c0392b]/80 border-[#c0392b]/40 text-white"
+  if (!isSelected) return "bg-[#f0eee6] border-[#e8e6dc] text-foreground/80 hover:bg-[#e8e6dc]"
+  if (market.type === "moneyline") return "bg-[#e8e6dc] border-[#d1cfc5] text-[#141413]"
+  if (market.type === "spread") return "bg-[#b53333]/10 border-[#b53333]/25 text-[#b53333]"
   if (market.type === "total") {
     const name = market.outcomes[idx]?.name?.toLowerCase() ?? ""
-    if (name.startsWith("over")) return "bg-[#27ae60]/80 border-[#27ae60]/40 text-white"
-    return "bg-[#c0392b]/80 border-[#c0392b]/40 text-white"
+    if (name.startsWith("over")) return "bg-emerald-700/10 border-emerald-700/25 text-emerald-800"
+    return "bg-[#b53333]/10 border-[#b53333]/25 text-[#b53333]"
   }
   if (market.type === "nrfi") {
     const name = market.outcomes[idx]?.name?.toLowerCase() ?? ""
-    if (name.includes("no")) return "bg-[#27ae60]/80 border-[#27ae60]/40 text-white"
-    return "bg-[#c0392b]/80 border-[#c0392b]/40 text-white"
+    if (name.includes("no")) return "bg-emerald-700/10 border-emerald-700/25 text-emerald-800"
+    return "bg-[#b53333]/10 border-[#b53333]/25 text-[#b53333]"
   }
-  return "bg-[#2d2d3d] border-white/20 text-white"
+  return "bg-[#e8e6dc] border-[#d1cfc5] text-[#141413]"
 }
 
 function MarketSection({ market, home, away, onSelect, selectedIdx }: {
@@ -913,9 +913,9 @@ function YourOrders({ gamePk, home, away }: { gamePk: number; home: string; away
         <div className="space-y-1.5">
           {orders.map((o) => {
             const label = shortName(o.outcome_name, home, away)
-            const sideColor = o.side === "buy" ? "text-emerald-400" : "text-red-300"
+            const sideColor = o.side === "buy" ? "text-emerald-700" : "text-[#b53333]"
             return (
-              <div key={o.id} className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-white/[0.03] border border-white/[0.05]">
+              <div key={o.id} className="flex items-center justify-between text-xs py-1.5 px-2 rounded bg-[#f0eee6] border border-[#e8e6dc]">
                 <div className="min-w-0 flex-1">
                   <div className="flex items-center gap-1.5">
                     <span className="text-muted-foreground capitalize">{o.market_type}</span>
@@ -929,7 +929,7 @@ function YourOrders({ gamePk, home, away }: { gamePk: number; home: string; away
                 </div>
                 <button
                   onClick={() => removeOrder(o.id)}
-                  className="text-muted-foreground/60 hover:text-red-300 text-xs ml-2 cursor-pointer"
+                  className="text-muted-foreground/60 hover:text-[#b53333] text-xs ml-2 cursor-pointer"
                   title="Remove"
                 >
                   ✕
@@ -961,8 +961,8 @@ function MiniPortfolioBar({ user }: { user: string }) {
   const openGain = portfolio.total_pnl >= 0
   const lifetime = portfolio.lifetime_pnl ?? 0
   const lifetimeGain = lifetime >= 0
-  const openColor = openGain ? "text-emerald-400" : "text-red-300"
-  const lifetimeColor = lifetimeGain ? "text-emerald-400" : "text-red-300"
+  const openColor = openGain ? "text-emerald-700" : "text-[#b53333]"
+  const lifetimeColor = lifetimeGain ? "text-emerald-700" : "text-[#b53333]"
   const openSign = openGain ? "+" : "−"
   const lifetimeSign = lifetimeGain ? "+" : "−"
 
@@ -1042,7 +1042,7 @@ function HomePage() {
 
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
-          <h1 className="text-2xl font-bold">MLB Gameday</h1>
+          <h1 className="text-2xl font-serif" style={{ fontWeight: 500 }}>MLB Gameday</h1>
         </div>
 
         {/* Date navigation */}
@@ -1052,7 +1052,7 @@ function HomePage() {
             &larr; Prev
           </button>
           <div className="text-center">
-            <div className="text-lg font-semibold">{displayDate}</div>
+            <div className="text-lg font-serif" style={{ fontWeight: 500 }}>{displayDate}</div>
             <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
               className="text-xs text-muted-foreground hover:text-foreground cursor-pointer mt-1">
               Today
@@ -1078,7 +1078,7 @@ function HomePage() {
                 className="flex items-center justify-between px-4 py-3 rounded-lg hover:bg-secondary/50 transition-colors group"
               >
                 <div className="flex items-center gap-4 min-w-0">
-                  {isLive && <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse shrink-0" />}
+                  {isLive && <span className="w-2 h-2 rounded-full bg-[#c96442] animate-pulse shrink-0" />}
                   {!isLive && <span className="w-2 h-2 shrink-0" />}
                   <div className="flex items-center gap-3 text-sm min-w-0">
                     <div className="w-32 flex justify-between">
@@ -1094,7 +1094,7 @@ function HomePage() {
                 </div>
                 <div className="flex items-center gap-3 shrink-0">
                   {isLive && (
-                    <span className="text-xs font-semibold text-emerald-400">
+                    <span className="text-xs font-semibold text-[#c96442]">
                       {arrow} {ordinal(g.current_inning)}
                     </span>
                   )}
@@ -1261,10 +1261,10 @@ function inferMarketType(title: string, outcome: string): MarketType {
 }
 
 const MARKET_TYPE_META: Record<MarketType, { label: string; dot: string; text: string }> = {
-  moneyline: { label: "ML",   dot: "bg-sky-400",    text: "text-sky-300" },
-  spread:    { label: "SPR",  dot: "bg-orange-400", text: "text-orange-300" },
-  total:     { label: "O/U",  dot: "bg-violet-400", text: "text-violet-300" },
-  nrfi:      { label: "NRFI", dot: "bg-amber-400",  text: "text-amber-300" },
+  moneyline: { label: "ML",   dot: "bg-[#c96442]",    text: "text-[#c96442]" },
+  spread:    { label: "SPR",  dot: "bg-orange-600", text: "text-orange-700" },
+  total:     { label: "O/U",  dot: "bg-violet-600", text: "text-violet-700" },
+  nrfi:      { label: "NRFI", dot: "bg-amber-600",  text: "text-amber-700" },
   other:     { label: "···",  dot: "bg-muted-foreground", text: "text-muted-foreground" },
 }
 
@@ -1355,7 +1355,7 @@ function TimeframeSelector({
   onChange: (v: PnlInterval) => void
   gain: boolean
 }) {
-  const accent = gain ? "bg-emerald-400" : "bg-red-300"
+  const accent = gain ? "bg-emerald-600" : "bg-[#b53333]"
   return (
     <div className="inline-flex border border-border/60 bg-background/40 divide-x divide-border/60 select-none">
       {(["1d", "1w", "1m", "all"] as PnlInterval[]).map((tf) => {
@@ -1478,21 +1478,21 @@ function PnlSparkline({
       </defs>
 
       {/* Chart frame hairlines (top + bottom ticks at each end) */}
-      <line x1={padX} x2={padX} y1={padY - 6} y2={padY - 1} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
-      <line x1={width - padX} x2={width - padX} y1={padY - 6} y2={padY - 1} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
-      <line x1={padX} x2={padX} y1={padY + h + 1} y2={padY + h + 6} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
-      <line x1={width - padX} x2={width - padX} y1={padY + h + 1} y2={padY + h + 6} stroke="rgba(255,255,255,0.3)" strokeWidth="0.6" />
+      <line x1={padX} x2={padX} y1={padY - 6} y2={padY - 1} stroke="rgba(20,20,19,0.15)" strokeWidth="0.6" />
+      <line x1={width - padX} x2={width - padX} y1={padY - 6} y2={padY - 1} stroke="rgba(20,20,19,0.15)" strokeWidth="0.6" />
+      <line x1={padX} x2={padX} y1={padY + h + 1} y2={padY + h + 6} stroke="rgba(20,20,19,0.15)" strokeWidth="0.6" />
+      <line x1={width - padX} x2={width - padX} y1={padY + h + 1} y2={padY + h + 6} stroke="rgba(20,20,19,0.15)" strokeWidth="0.6" />
 
       {/* Zero baseline */}
       {minP < 0 && maxP > 0 && (
         <>
           <line
             x1={padX} x2={width - padX} y1={zeroY} y2={zeroY}
-            stroke="rgba(255,255,255,0.14)" strokeWidth="0.5" strokeDasharray="2,3"
+            stroke="rgba(20,20,19,0.10)" strokeWidth="0.5" strokeDasharray="2,3"
           />
           <text
             x={width - padX - 2} y={zeroY - 3}
-            fontSize="8" fill="rgba(255,255,255,0.35)"
+            fontSize="8" fill="rgba(20,20,19,0.35)"
             textAnchor="end" fontFamily="ui-monospace, SFMono-Regular, monospace"
           >
             0
@@ -1524,12 +1524,12 @@ function PnlSparkline({
           {/* Vertical line (full height) */}
           <line
             x1={hoverX} x2={hoverX} y1={padY - 8} y2={padY + h + 8}
-            stroke="rgba(255,255,255,0.35)" strokeWidth="0.6" strokeDasharray="1.5,2.5"
+            stroke="rgba(20,20,19,0.25)" strokeWidth="0.6" strokeDasharray="1.5,2.5"
           />
           {/* Horizontal line (full width) */}
           <line
             x1={padX - 4} x2={width - padX + 4} y1={hoverY} y2={hoverY}
-            stroke="rgba(255,255,255,0.2)" strokeWidth="0.6" strokeDasharray="1.5,2.5"
+            stroke="rgba(20,20,19,0.15)" strokeWidth="0.6" strokeDasharray="1.5,2.5"
           />
           {/* Square marker rotated 45° */}
           <rect
@@ -1547,7 +1547,7 @@ function PnlSparkline({
 
 function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
   const openGain = p.total_pnl >= 0
-  const openColor = openGain ? "text-emerald-400" : "text-red-300"
+  const openColor = openGain ? "text-emerald-700" : "text-[#b53333]"
 
   const lifetime = p.lifetime_pnl ?? 0
   const pnlMap = (p.pnl_series ?? {}) as Partial<Record<PnlInterval, PnlPoint[]>>
@@ -1581,10 +1581,10 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
     : defaultLabel
 
   const shownGain = shownValue >= 0
-  const shownColor = shownGain ? "text-emerald-400" : "text-red-300"
+  const shownColor = shownGain ? "text-emerald-700" : "text-[#b53333]"
 
   // The ambient glow follows the dominant number currently on screen
-  const glowColor = shownGain ? "rgba(52,211,153,0.15)" : "rgba(248,113,113,0.15)"
+  const glowColor = shownGain ? "rgba(4,120,87,0.08)" : "rgba(181,51,51,0.08)"
 
   const firstAllT = (pnlMap.all ?? [])[0]?.t
   const sinceLabel = firstAllT
@@ -1603,7 +1603,7 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
       <div
         className="absolute inset-0 pointer-events-none opacity-[0.07]"
         style={{
-          backgroundImage: "radial-gradient(circle, #ffffff 1px, transparent 1px)",
+          backgroundImage: "radial-gradient(circle, #87867f 1px, transparent 1px)",
           backgroundSize: "22px 22px",
         }}
       />
@@ -1627,10 +1627,10 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
             <span className="text-[11px] font-semibold text-foreground">@{p.username ?? user}</span>
           </div>
           <div className="flex items-center gap-3">
-            <span className="relative flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] text-emerald-400">
+            <span className="relative flex items-center gap-1.5 text-[10px] uppercase tracking-[0.2em] text-emerald-700">
               <span className="relative flex w-1.5 h-1.5">
-                <span className="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" />
-                <span className="relative rounded-full w-1.5 h-1.5 bg-emerald-400" />
+                <span className="absolute inset-0 rounded-full bg-emerald-600 animate-ping opacity-60" />
+                <span className="relative rounded-full w-1.5 h-1.5 bg-emerald-600" />
               </span>
               Live
             </span>
@@ -1757,11 +1757,11 @@ function TopMoversRow({ positions }: { positions: Position[] }) {
   if (gainer.cash_pnl <= 0 && loser.cash_pnl >= 0) return null
 
   const Card = ({ label, pos, gain }: { label: string; pos: Position; gain: boolean }) => {
-    const color = gain ? "text-emerald-400" : "text-red-300"
-    const bg = gain ? "bg-emerald-500/5 border-emerald-500/20" : "bg-red-300/5 border-red-300/20"
+    const color = gain ? "text-emerald-700" : "text-[#b53333]"
+    const bg = gain ? "bg-emerald-500/5 border-emerald-500/20" : "bg-[#b53333]/5 border-red-300/20"
     return (
       <div className={`relative overflow-hidden rounded-xl border ${bg} p-4`}>
-        <div className={`absolute top-0 left-0 right-0 h-px ${gain ? "bg-emerald-500/40" : "bg-red-300/40"}`} />
+        <div className={`absolute top-0 left-0 right-0 h-px ${gain ? "bg-emerald-500/40" : "bg-[#b53333]/40"}`} />
         <div className="flex items-center justify-between mb-3">
           <span className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{label}</span>
           <span className={`text-[10px] font-bold uppercase tracking-wider ${color}`}>
@@ -1796,8 +1796,8 @@ function PriceProgressionBar({ avg, cur, gain }: { avg: number; cur: number; gai
   const curPct = Math.max(0, Math.min(100, cur * 100))
   const left = Math.min(avgPct, curPct)
   const width = Math.max(0.5, Math.abs(curPct - avgPct))
-  const barColor = gain ? "bg-emerald-500/60" : "bg-red-300/60"
-  const curColor = gain ? "bg-emerald-400" : "bg-red-300"
+  const barColor = gain ? "bg-emerald-500/60" : "bg-[#b53333]/60"
+  const curColor = gain ? "bg-emerald-600" : "bg-[#b53333]"
   return (
     <div className="relative h-1 rounded-full bg-secondary/60 overflow-visible">
       {/* Segment between avg and current */}
@@ -1821,13 +1821,13 @@ function PriceProgressionBar({ avg, cur, gain }: { avg: number; cur: number; gai
 
 function PositionRow({ pos }: { pos: Position }) {
   const gain = pos.cash_pnl >= 0
-  const pnlColor = gain ? "text-emerald-400" : "text-red-300"
+  const pnlColor = gain ? "text-emerald-700" : "text-[#b53333]"
   const type = inferMarketType(pos.title, pos.outcome)
 
   return (
     <div className="relative px-5 py-4 border-t border-border/30 hover:bg-secondary/10 transition-colors group">
       {/* Gain/loss accent stripe on the left edge */}
-      <div className={`absolute left-0 top-0 bottom-0 w-px ${gain ? "bg-emerald-400/40" : "bg-red-300/40"} group-hover:w-0.5 transition-all`} />
+      <div className={`absolute left-0 top-0 bottom-0 w-px ${gain ? "bg-emerald-600/40" : "bg-[#b53333]/40"} group-hover:w-0.5 transition-all`} />
 
       <div className="flex items-center gap-4">
         {/* Left: type + outcome */}
@@ -1835,8 +1835,8 @@ function PositionRow({ pos }: { pos: Position }) {
           <div className="flex items-center gap-2 mb-1">
             <MarketTypeBadge type={type} />
             {pos.is_live && (
-              <span className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-emerald-400/70">
-                <span className="w-1 h-1 rounded-full bg-emerald-400 animate-pulse" />
+              <span className="flex items-center gap-1 text-[9px] uppercase tracking-wider text-emerald-700/70">
+                <span className="w-1 h-1 rounded-full bg-emerald-600 animate-pulse" />
                 Live
               </span>
             )}
@@ -1855,7 +1855,7 @@ function PositionRow({ pos }: { pos: Position }) {
             </span>
             <span className="flex-1 h-px bg-border/50" />
             <span className="text-muted-foreground">
-              NOW <span className={`font-semibold ${gain ? "text-emerald-300" : "text-red-300"}`}>{formatPrice(pos.cur_price)}</span>
+              NOW <span className={`font-semibold ${gain ? "text-emerald-700" : "text-[#b53333]"}`}>{formatPrice(pos.cur_price)}</span>
             </span>
           </div>
           <PriceProgressionBar avg={pos.avg_price} cur={pos.cur_price} gain={gain} />
@@ -1878,7 +1878,7 @@ function PositionRow({ pos }: { pos: Position }) {
 
 function EventGroupCard({ group }: { group: EventGroup }) {
   const gain = group.totalPnl >= 0
-  const pnlColor = gain ? "text-emerald-400" : "text-red-300"
+  const pnlColor = gain ? "text-emerald-700" : "text-[#b53333]"
   const href = group.eventSlug ? `https://polymarket.com/event/${group.eventSlug}` : undefined
 
   return (
@@ -2051,8 +2051,8 @@ function ActivityTimeline({ items }: { items: Activity[] }) {
               {/* Trades */}
               {day.items.map((a, i) => {
                 const buy = a.side === "BUY"
-                const sideColor = buy ? "text-emerald-400" : "text-red-300"
-                const sideBg = buy ? "bg-emerald-500/10 border-emerald-500/20" : "bg-red-300/10 border-red-300/20"
+                const sideColor = buy ? "text-emerald-700" : "text-[#b53333]"
+                const sideBg = buy ? "bg-emerald-500/10 border-emerald-500/20" : "bg-[#b53333]/10 border-red-300/20"
                 const href = a.eventSlug ? `https://polymarket.com/event/${a.eventSlug}` : undefined
                 return (
                   <div
