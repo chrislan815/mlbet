@@ -55,7 +55,8 @@ TEAM_ABBREV: dict[str, str] = {
     "Detroit Tigers": "det", "Houston Astros": "hou", "Kansas City Royals": "kc",
     "Los Angeles Angels": "laa", "Los Angeles Dodgers": "lad", "Miami Marlins": "mia",
     "Milwaukee Brewers": "mil", "Minnesota Twins": "min", "New York Mets": "nym",
-    "New York Yankees": "nyy", "Oakland Athletics": "oak", "Philadelphia Phillies": "phi",
+    "New York Yankees": "nyy", "Oakland Athletics": "oak", "Athletics": "oak",
+    "Philadelphia Phillies": "phi",
     "Pittsburgh Pirates": "pit", "San Diego Padres": "sd", "San Francisco Giants": "sf",
     "Seattle Mariners": "sea", "St. Louis Cardinals": "stl", "Tampa Bay Rays": "tb",
     "Texas Rangers": "tex", "Toronto Blue Jays": "tor", "Washington Nationals": "wsh",
@@ -1057,6 +1058,46 @@ async def index():
     return FileResponse(str(STATIC_DIR / "index.html"))
 
 
+async def _fetch_mlb_schedule(target_date) -> list[dict]:
+    """Fetch today's schedule from MLB Stats API and return GameInfo-shaped dicts."""
+    date_str = target_date.strftime("%m/%d/%Y")
+    try:
+        resp = await asyncio.to_thread(
+            lambda: __import__("urllib.request", fromlist=["urlopen"]).urlopen(
+                f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={date_str}"
+                "&hydrate=team,venue,linescore"
+            ).read()
+        )
+        data = json.loads(resp)
+    except Exception:
+        return []
+    results = []
+    for date_entry in data.get("dates", []):
+        for g in date_entry.get("games", []):
+            teams = g.get("teams", {})
+            away = teams.get("away", {}).get("team", {})
+            home = teams.get("home", {}).get("team", {})
+            linescore = g.get("linescore", {})
+            game_date = g.get("officialDate", str(target_date))
+            away_name = away.get("name", "")
+            home_name = home.get("name", "")
+            results.append({
+                "game_pk": g.get("gamePk"),
+                "status": g.get("status", {}).get("detailedState", "Scheduled"),
+                "home_team_name": home_name,
+                "away_team_name": away_name,
+                "home_score": teams.get("home", {}).get("score", 0) or 0,
+                "away_score": teams.get("away", {}).get("score", 0) or 0,
+                "current_inning": linescore.get("currentInning") or 0,
+                "inning_state": linescore.get("inningState", "") or "",
+                "venue_name": g.get("venue", {}).get("name", ""),
+                "game_datetime": g.get("gameDate", ""),
+                "game_date": game_date,
+                "slug": _game_slug(away_name, home_name, game_date),
+            })
+    return results
+
+
 @app.get("/api/games")
 async def games(date: str | None = Query(default=None)):
     if date:
@@ -1067,6 +1108,38 @@ async def games(date: str | None = Query(default=None)):
     else:
         target = datetime.now().date()
 
+    # For today and future dates, always fetch live schedule from MLB API
+    # so pre-game / scheduled games show up before they're ingested.
+    if target >= datetime.now().date():
+        api_games = await _fetch_mlb_schedule(target)
+        if api_games:
+            # Merge with DB data for richer info on games already ingested
+            db_by_pk = {}
+            async with pool.acquire() as conn:
+                rows = await conn.fetch(
+                    'SELECT game_pk, status, home_team_name, away_team_name,'
+                    '  home_score, away_score, current_inning, inning_state,'
+                    '  venue_name, game_datetime, game_date'
+                    ' FROM game WHERE game_date = $1'
+                    ' ORDER BY game_datetime',
+                    str(target))
+            for r in rows:
+                db_by_pk[r["game_pk"]] = dict(r)
+
+            result = []
+            for g in api_games:
+                db_row = db_by_pk.get(g["game_pk"])
+                if db_row:
+                    db_row["slug"] = _game_slug(
+                        db_row.get("away_team_name", ""),
+                        db_row.get("home_team_name", ""),
+                        str(db_row.get("game_date", "")))
+                    result.append(db_row)
+                else:
+                    result.append(g)
+            return result
+
+    # Past dates: DB only
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             'SELECT game_pk, status, home_team_name, away_team_name,'
