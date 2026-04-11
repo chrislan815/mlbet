@@ -1053,10 +1053,12 @@ function HomePage() {
           </button>
           <div className="text-center">
             <div className="text-lg font-serif" style={{ fontWeight: 500 }}>{displayDate}</div>
-            <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
-              className="text-xs text-muted-foreground hover:text-foreground cursor-pointer mt-1">
-              Today
-            </button>
+            {date !== new Date().toISOString().slice(0, 10) && (
+              <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+                className="mt-1.5 px-3 py-0.5 text-xs text-[#5e5d59] rounded-md border border-[#e8e6dc] hover:bg-[#e8e6dc] hover:text-[#141413] cursor-pointer transition-colors">
+                Today
+              </button>
+            )}
           </div>
           <button onClick={() => changeDate(1)}
             className="px-3 py-1.5 rounded-md bg-secondary text-sm hover:bg-secondary/80 transition-colors cursor-pointer">

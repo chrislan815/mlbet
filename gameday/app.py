@@ -843,7 +843,7 @@ async def _poll_odds_loop(game_pk: int):
 
             market_data = await _fetch_market_data(event)
             market_data["available"] = True
-            market_data["updated_at"] = datetime.utcnow().isoformat()
+            market_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
             _odds_cache[game_pk] = market_data
 
             # Ensure the live WS stream is running for this game's tokens.
@@ -1169,7 +1169,7 @@ async def _poll_portfolio_loop(wallet: str, username: str):
             _portfolio_cache[wallet] = {
                 "username": username,
                 "positions": positions,
-                "updated_at": datetime.utcnow().isoformat(),
+                "updated_at": datetime.utcnow().isoformat() + "Z",
             }
             token_ids = [p.get("asset") for p in positions if p.get("asset")]
             await _ensure_portfolio_ws(wallet, token_ids)
@@ -1285,7 +1285,7 @@ async def games(date: str | None = Query(default=None)):
                     result.append(g)
             return result
 
-    # Past dates: DB only
+    # Past dates: DB only — normalize stale live statuses to Final
     async with pool.acquire() as conn:
         rows = await conn.fetch(
             'SELECT game_pk, status, home_team_name, away_team_name,'
@@ -1298,6 +1298,8 @@ async def games(date: str | None = Query(default=None)):
     result = []
     for r in rows:
         d = dict(r)
+        if d.get("status") in LIVE_STATUSES:
+            d["status"] = "Final"
         d["slug"] = _game_slug(d.get("away_team_name", ""), d.get("home_team_name", ""), str(d.get("game_date", "")))
         result.append(d)
     return result
