@@ -216,7 +216,7 @@ async def build_game_state(game_pk: int) -> dict | None:
     )
 
     if not game_row:
-        return None
+        return await _build_game_state_from_api(game_pk)
 
     game_info = {
         "game_pk": game_row["game_pk"],
@@ -341,10 +341,148 @@ async def build_game_state(game_pk: int) -> dict | None:
     }
 
 
+async def _build_game_state_from_api(game_pk: int) -> dict | None:
+    """Build game state directly from MLB live feed API (for games not yet in DB)."""
+    try:
+        resp = await asyncio.to_thread(
+            lambda: __import__("urllib.request", fromlist=["urlopen"]).urlopen(
+                f"https://statsapi.mlb.com/api/v1.1/game/{game_pk}/feed/live"
+            ).read()
+        )
+        data = json.loads(resp)
+    except Exception:
+        return None
+
+    gd = data.get("gameData", {})
+    ld = data.get("liveData", {})
+    ls = ld.get("linescore", {})
+    plays_data = ld.get("plays", {})
+    status = gd.get("status", {}).get("detailedState", "Scheduled")
+
+    game_info = {
+        "game_pk": game_pk,
+        "status": status,
+        "home_team_name": gd.get("teams", {}).get("home", {}).get("name", ""),
+        "away_team_name": gd.get("teams", {}).get("away", {}).get("name", ""),
+        "home_score": ls.get("teams", {}).get("home", {}).get("runs") or 0,
+        "away_score": ls.get("teams", {}).get("away", {}).get("runs") or 0,
+        "current_inning": ls.get("currentInning") or 0,
+        "inning_state": ls.get("inningState", "") or "",
+        "venue_name": gd.get("venue", {}).get("name", ""),
+    }
+
+    # Linescore
+    linescore = []
+    for inn in ls.get("innings", []):
+        linescore.append({
+            "inning": inn.get("num", 0),
+            "away": inn.get("away", {}).get("runs") or 0,
+            "home": inn.get("home", {}).get("runs") or 0,
+        })
+
+    # Current at-bat
+    current_ab = None
+    pitches = []
+    runners = {"first": None, "second": None, "third": None}
+    count = {"balls": 0, "strikes": 0, "outs": 0}
+
+    cp = plays_data.get("currentPlay", {})
+    if cp.get("matchup"):
+        matchup = cp["matchup"]
+        current_ab = {
+            "atBatIndex": cp.get("atBatIndex", 0),
+            "batter_name": matchup.get("batter", {}).get("fullName", ""),
+            "batter_id": matchup.get("batter", {}).get("id", 0),
+            "pitcher_name": matchup.get("pitcher", {}).get("fullName", ""),
+            "pitcher_id": matchup.get("pitcher", {}).get("id", 0),
+            "bat_side": matchup.get("batSide", {}).get("code", ""),
+            "pitch_hand": matchup.get("pitchHand", {}).get("code", ""),
+            "is_complete": cp.get("about", {}).get("isComplete", False),
+            "result": cp.get("result", {}).get("event"),
+            "result_description": cp.get("result", {}).get("description"),
+        }
+
+        cnt = cp.get("count", {})
+        count = {
+            "balls": cnt.get("balls", 0),
+            "strikes": cnt.get("strikes", 0),
+            "outs": cnt.get("outs", 0),
+        }
+
+        # Runners from current play
+        for runner in cp.get("runners", []):
+            mov = runner.get("movement", {})
+            end = mov.get("end")
+            if end and end != "score":
+                base_map = {"1B": "first", "2B": "second", "3B": "third"}
+                base_key = base_map.get(end)
+                if base_key:
+                    details = runner.get("details", {})
+                    runners[base_key] = {
+                        "id": details.get("runner", {}).get("id", 0),
+                        "name": details.get("runner", {}).get("fullName", "?"),
+                    }
+
+        # Pitches from current at-bat
+        for pe in cp.get("playEvents", []):
+            if not pe.get("isPitch"):
+                continue
+            pd = pe.get("pitchData", {})
+            coords = pd.get("coordinates", {})
+            breaks = pd.get("breaks", {})
+            hd = pe.get("hitData", {})
+            det = pe.get("details", {})
+            pitches.append({
+                "num": pe.get("pitchNumber", 0),
+                "type_code": det.get("type", {}).get("code"),
+                "type_desc": det.get("type", {}).get("description"),
+                "speed": pd.get("startSpeed"),
+                "call": det.get("description", ""),
+                "call_code": det.get("code", ""),
+                "pX": coords.get("pX"),
+                "pZ": coords.get("pZ"),
+                "szTop": pe.get("pitchData", {}).get("strikeZoneTop"),
+                "szBottom": pe.get("pitchData", {}).get("strikeZoneBottom"),
+                "is_strike": det.get("isStrike", False),
+                "is_ball": det.get("isBall", False),
+                "is_in_play": det.get("isInPlay", False),
+                "spin_rate": breaks.get("spinRate"),
+                "break_vert": breaks.get("breakVerticalInduced"),
+                "break_horiz": breaks.get("breakHorizontal"),
+                "hit_speed": hd.get("launchSpeed"),
+                "hit_angle": hd.get("launchAngle"),
+                "hit_distance": hd.get("totalDistance"),
+            })
+
+    # Recent completed plays
+    all_plays = plays_data.get("allPlays", [])
+    recent = [p for p in all_plays if p.get("about", {}).get("isComplete")][-25:]
+    plays = [
+        {
+            "atBatIndex": p.get("atBatIndex", 0),
+            "inning": p.get("about", {}).get("inning", 0),
+            "is_top": p.get("about", {}).get("isTopInning", True),
+            "event": p.get("result", {}).get("event", ""),
+            "description": p.get("result", {}).get("description", ""),
+            "batter": p.get("matchup", {}).get("batter", {}).get("fullName", ""),
+            "pitcher": p.get("matchup", {}).get("pitcher", {}).get("fullName", ""),
+            "away_score": p.get("result", {}).get("awayScore", 0),
+            "home_score": p.get("result", {}).get("homeScore", 0),
+            "is_scoring": p.get("about", {}).get("isScoringPlay", False),
+        }
+        for p in reversed(recent)
+    ]
+
+    return {
+        "game": game_info, "linescore": linescore, "current_ab": current_ab,
+        "pitches": pitches, "runners": runners, "count": count, "plays": plays,
+    }
+
+
 # ── SSE background poller (adaptive rate) ────────────────────────────────
 
 async def _poll_game_loop(game_pk: int):
-    """Poll DB for game state. Fast for live, slow for final, stop when no subscribers."""
+    """Poll DB or MLB API for game state. Fast for live, slow for final, stop when no subscribers."""
     consecutive_finals = 0
     while _cache_subscribers.get(game_pk, 0) > 0:
         try:
@@ -1282,9 +1420,20 @@ async def game_by_slug(slug: str):
             'SELECT game_pk FROM game WHERE away_team_name = $1 AND home_team_name = $2 AND game_date = $3',
             away_team, home_team, date_str)
 
-    if not row:
-        return JSONResponse({"error": "Game not found"}, status_code=404)
-    return {"game_pk": row["game_pk"], "slug": slug}
+    if row:
+        return {"game_pk": row["game_pk"], "slug": slug}
+
+    # Fallback: check MLB schedule API for games not yet in DB
+    try:
+        target = datetime.strptime(date_str, "%Y-%m-%d").date()
+        api_games = await _fetch_mlb_schedule(target)
+        for g in api_games:
+            if g.get("away_team_name") == away_team and g.get("home_team_name") == home_team:
+                return {"game_pk": g["game_pk"], "slug": slug}
+    except Exception:
+        pass
+
+    return JSONResponse({"error": "Game not found"}, status_code=404)
 
 
 @app.get("/api/portfolio/{username}")
