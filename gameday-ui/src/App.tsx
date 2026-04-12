@@ -1002,14 +1002,18 @@ function MiniPortfolioBar({ user }: { user: string }) {
   )
 }
 
+// All HomePage dates are **user-local calendar dates** — never UTC-derived.
+// Using toISOString would shift the string by up to a day for users outside
+// UTC, producing "Today" buttons that disagree with the user's own calendar.
+function toLocalDateString(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`
+}
+
 // ── Home Page ──────────────────────────────────────
 function HomePage() {
   const [games, setGames] = useState<GameInfo[]>([])
-  const [date, setDate] = useState(() => {
-    const now = new Date()
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`
-  })
-
+  const [date, setDate] = useState(() => toLocalDateString(new Date()))
+  const todayLocal = toLocalDateString(new Date())
 
   useEffect(() => {
     fetch(`/api/games?date=${date}`).then(r => r.json()).then(setGames).catch(() => {})
@@ -1018,7 +1022,7 @@ function HomePage() {
   const changeDate = (delta: number) => {
     const d = new Date(date + "T12:00:00")
     d.setDate(d.getDate() + delta)
-    setDate(d.toISOString().slice(0, 10))
+    setDate(toLocalDateString(d))
   }
 
   // Format date for display
@@ -1053,8 +1057,8 @@ function HomePage() {
           </button>
           <div className="text-center">
             <div className="text-lg font-serif" style={{ fontWeight: 500 }}>{displayDate}</div>
-            {date !== new Date().toISOString().slice(0, 10) && (
-              <button onClick={() => setDate(new Date().toISOString().slice(0, 10))}
+            {date !== todayLocal && (
+              <button onClick={() => setDate(todayLocal)}
                 className="mt-1.5 px-3 py-0.5 text-xs text-[#5e5d59] rounded-md border border-[#e8e6dc] hover:bg-[#e8e6dc] hover:text-[#141413] cursor-pointer transition-colors">
                 Today
               </button>

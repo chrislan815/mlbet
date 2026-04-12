@@ -10,7 +10,20 @@ import hashlib
 import json
 import re
 from contextlib import asynccontextmanager
-from datetime import datetime, timedelta
+from datetime import date as date_cls, datetime, timedelta, timezone
+
+
+def _utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def _utc_today() -> date_cls:
+    return _utc_now().date()
+
+
+def _utc_iso_z() -> str:
+    # ISO 8601 with explicit Z suffix — stable wire format across locales.
+    return _utc_now().isoformat(timespec="seconds").replace("+00:00", "Z")
 from pathlib import Path
 
 import asyncpg
@@ -113,7 +126,7 @@ async def _sync_game_statuses():
     """Periodically sync game statuses from MLB API to catch Final transitions."""
     while True:
         try:
-            today = datetime.now().strftime("%m/%d/%Y")
+            today = _utc_now().strftime("%m/%d/%Y")
             resp = await asyncio.to_thread(
                 lambda: __import__("urllib.request", fromlist=["urlopen"]).urlopen(
                     f"https://statsapi.mlb.com/api/v1/schedule?sportId=1&date={today}"
@@ -137,7 +150,16 @@ async def _sync_game_statuses():
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
     global pool, http_client
-    pool = await asyncpg.create_pool(PG_DSN, min_size=2, max_size=10)
+    # Resilience knobs: recycle idle conns so a DB restart or network blip
+    # doesn't leave us handing out dead handles; cap per-query wall time so
+    # a hung query can't pin a connection forever.
+    pool = await asyncpg.create_pool(
+        PG_DSN,
+        min_size=2,
+        max_size=20,
+        command_timeout=15.0,
+        max_inactive_connection_lifetime=300.0,
+    )
     http_client = httpx.AsyncClient(timeout=10.0)
     sync_task = asyncio.create_task(_sync_game_statuses())
     yield
@@ -824,13 +846,13 @@ async def _poll_odds_loop(game_pk: int):
                     _game_cache[game_pk] = game_state
                     home = game_state["game"]["home_team_name"]
                     away = game_state["game"]["away_team_name"]
-                    game_date = datetime.now().strftime("%Y-%m-%d")
+                    game_date = _utc_now().strftime("%Y-%m-%d")
             else:
                 home = game_state["game"]["home_team_name"]
                 away = game_state["game"]["away_team_name"]
                 if game_pk not in _poly_slug_cache:
                     row = await _fetchrow('SELECT game_date FROM game WHERE game_pk = $1', game_pk)
-                    game_date = str(row["game_date"]) if row else datetime.now().strftime("%Y-%m-%d")
+                    game_date = str(row["game_date"]) if row else _utc_now().strftime("%Y-%m-%d")
                 else:
                     game_date = None  # slug already cached
 
@@ -842,7 +864,7 @@ async def _poll_odds_loop(game_pk: int):
 
             market_data = await _fetch_market_data(event)
             market_data["available"] = True
-            market_data["updated_at"] = datetime.utcnow().isoformat() + "Z"
+            market_data["updated_at"] = _utc_iso_z()
             _odds_cache[game_pk] = market_data
 
             # Ensure the live WS stream is running for this game's tokens.
@@ -1154,7 +1176,7 @@ async def _poll_portfolio_loop(wallet: str, username: str):
             _portfolio_cache[wallet] = {
                 "username": username,
                 "positions": positions,
-                "updated_at": datetime.utcnow().isoformat() + "Z",
+                "updated_at": _utc_iso_z(),
             }
             token_ids = [p.get("asset") for p in positions if p.get("asset")]
             await _ensure_portfolio_ws(wallet, token_ids)
@@ -1230,13 +1252,18 @@ async def _fetch_mlb_schedule(target_date) -> list[dict]:
 
 @app.get("/api/games")
 async def games(date: str | None = Query(default=None)):
+    # The `date` param is whatever the user's browser considers "today" in
+    # their local calendar. The server stays in UTC so it's unambiguous; we
+    # just compare dates with a ±1 day cushion to absorb TZ skew between
+    # user-local, server-UTC, and stadium-local boundaries.
+    utc_today = _utc_today()
     if date:
         try:
             target = datetime.strptime(date, "%Y-%m-%d").date()
         except ValueError:
-            target = datetime.now().date()
+            target = utc_today
     else:
-        target = datetime.now().date()
+        target = utc_today
 
     async def _db_rows_for(d) -> list[dict]:
         # Isolated so a DB failure here never sinks the whole endpoint —
@@ -1259,8 +1286,10 @@ async def games(date: str | None = Query(default=None)):
             return []
 
     # For today and future dates, always fetch live schedule from MLB API
-    # so pre-game / scheduled games show up before they're ingested.
-    if target >= datetime.now().date():
+    # so pre-game / scheduled games show up before they're ingested. The
+    # one-day cushion keeps "today" working for users on either side of the
+    # server's UTC date boundary.
+    if target >= utc_today - timedelta(days=1):
         api_games = await _fetch_mlb_schedule(target)
         if api_games:
             db_by_pk = {r["game_pk"]: r for r in await _db_rows_for(target)}
