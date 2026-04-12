@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react"
 import { Routes, Route, Link, useParams } from "react-router-dom"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
-import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel, Portfolio, Position, Activity, PnlPoint, PnlInterval } from "./types"
+import type { GameInfo, GameState, Pitch, Runners, Count, Play, LinescoreInning, OddsData, Market, OrderBook, OrderBookLevel, Portfolio, Position, PnlPoint, PnlInterval } from "./types"
 
 const PITCH_COLORS: Record<string, string> = {
   FF: "#ef4444", SI: "#f97316", FC: "#eab308", SL: "#facc15",
@@ -1242,14 +1242,6 @@ function formatPct(n: number): string {
   return `${sign}${n.toFixed(2)}%`
 }
 
-function formatRelativeTime(unixSeconds: number): string {
-  const diff = Date.now() / 1000 - unixSeconds
-  if (diff < 60) return `${Math.floor(diff)}s`
-  if (diff < 3600) return `${Math.floor(diff / 60)}m`
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h`
-  return `${Math.floor(diff / 86400)}d`
-}
-
 type MarketType = "moneyline" | "spread" | "total" | "nrfi" | "other"
 
 function inferMarketType(title: string, outcome: string): MarketType {
@@ -1350,6 +1342,27 @@ const INTERVAL_LABELS: Record<PnlInterval, string> = {
   "all": "ALL",
 }
 
+// Duration in seconds → "2h 15m", "3d 4h", "45m", etc. Range selection
+// shows this between the two anchors so the user can see elapsed time.
+function formatDuration(totalSeconds: number): string {
+  const s = Math.max(0, Math.round(totalSeconds))
+  if (s < 60) return `${s}s`
+  const mins = Math.floor(s / 60)
+  if (mins < 60) return `${mins}m`
+  const hrs = Math.floor(mins / 60)
+  const remMins = mins % 60
+  if (hrs < 48) return remMins ? `${hrs}h ${remMins}m` : `${hrs}h`
+  const days = Math.floor(hrs / 24)
+  const remHrs = hrs % 24
+  return remHrs ? `${days}d ${remHrs}h` : `${days}d`
+}
+
+function fmtRange(t: number): string {
+  return new Date(t * 1000).toLocaleString("en-US", {
+    month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+  })
+}
+
 function TimeframeSelector({
   value, onChange, gain,
 }: {
@@ -1381,18 +1394,29 @@ function TimeframeSelector({
   )
 }
 
+interface PnlRange {
+  start: number
+  end: number
+}
+
 interface SparklineProps {
   series: PnlPoint[]
   gain: boolean
   hoverIndex: number | null
   onHoverChange: (idx: number | null) => void
+  range: PnlRange | null
+  onRangeChange: (range: PnlRange | null) => void
   height?: number
 }
 
 function PnlSparkline({
-  series, gain, hoverIndex, onHoverChange, height = 140,
+  series, gain, hoverIndex, onHoverChange, range, onRangeChange, height = 140,
 }: SparklineProps) {
   const svgRef = useRef<SVGSVGElement>(null)
+  // Tracks the drag anchor (mousedown index) while the pointer is held.
+  // null when not actively dragging.
+  const dragAnchorRef = useRef<number | null>(null)
+  const dragMovedRef = useRef<boolean>(false)
   const width = 640   // viewBox coordinate space; SVG scales via CSS
 
   if (series.length < 2) {
@@ -1439,12 +1463,11 @@ function PnlSparkline({
   const lastY = yAt(ys[ys.length - 1])
 
   // Convert pointer X to the nearest series index.
-  function handlePointer(clientX: number) {
+  function pointerIndex(clientX: number): number | null {
     const rect = svgRef.current?.getBoundingClientRect()
-    if (!rect) return
+    if (!rect) return null
     const localX = ((clientX - rect.left) / rect.width) * width
     const t = minT + ((localX - padX) / w) * tSpan
-    // Binary search for nearest
     let lo = 0, hi = series.length - 1
     while (lo < hi) {
       const mid = (lo + hi) >> 1
@@ -1453,12 +1476,63 @@ function PnlSparkline({
     }
     let idx = lo
     if (idx > 0 && Math.abs(series[idx - 1].t - t) < Math.abs(series[idx].t - t)) idx = idx - 1
-    onHoverChange(idx)
+    return idx
+  }
+
+  function handlePointerDown(clientX: number) {
+    const idx = pointerIndex(clientX)
+    if (idx == null) return
+    dragAnchorRef.current = idx
+    dragMovedRef.current = false
+    onHoverChange(null)
+    onRangeChange({ start: idx, end: idx })
+  }
+
+  function handlePointerMove(clientX: number) {
+    const idx = pointerIndex(clientX)
+    if (idx == null) return
+    if (dragAnchorRef.current != null) {
+      if (idx !== dragAnchorRef.current) dragMovedRef.current = true
+      onRangeChange({ start: dragAnchorRef.current, end: idx })
+    } else {
+      onHoverChange(idx)
+    }
+  }
+
+  function handlePointerUp() {
+    // Keep the range locked after drag ends; treat a bare click (no
+    // movement) as a "clear" gesture so the user can dismiss without
+    // leaving the chart.
+    if (dragAnchorRef.current == null) return
+    const moved = dragMovedRef.current
+    dragAnchorRef.current = null
+    dragMovedRef.current = false
+    if (!moved) onRangeChange(null)
+  }
+
+  function handlePointerLeave() {
+    // Don't finalize mid-drag on leave — wait for an explicit up.
+    if (dragAnchorRef.current == null) onHoverChange(null)
   }
 
   const hover = hoverIndex != null ? series[hoverIndex] : null
   const hoverX = hover ? xAt(hover.t) : 0
   const hoverY = hover ? yAt(hover.p) : 0
+
+  // Normalize the range so a <= b regardless of drag direction.
+  const rNorm = range
+    ? { a: Math.min(range.start, range.end), b: Math.max(range.start, range.end) }
+    : null
+  const rStart = rNorm ? series[rNorm.a] : null
+  const rEnd = rNorm ? series[rNorm.b] : null
+  const rStartX = rStart ? xAt(rStart.t) : 0
+  const rStartY = rStart ? yAt(rStart.p) : 0
+  const rEndX = rEnd ? xAt(rEnd.t) : 0
+  const rEndY = rEnd ? yAt(rEnd.p) : 0
+  const rangeActive = rStart != null && rEnd != null
+  const rangeDelta = rangeActive ? rEnd!.p - rStart!.p : 0
+  const rangeUp = rangeDelta >= 0
+  const rangeColor = rangeUp ? "#059669" : "#b53333"
 
   return (
     <svg
@@ -1466,11 +1540,13 @@ function PnlSparkline({
       viewBox={`0 0 ${width} ${height}`}
       className="w-full h-full block cursor-crosshair touch-none select-none"
       preserveAspectRatio="none"
-      onMouseMove={(e) => handlePointer(e.clientX)}
-      onMouseLeave={() => onHoverChange(null)}
-      onTouchStart={(e) => { e.preventDefault(); if (e.touches[0]) handlePointer(e.touches[0].clientX) }}
-      onTouchMove={(e) => { e.preventDefault(); if (e.touches[0]) handlePointer(e.touches[0].clientX) }}
-      onTouchEnd={() => onHoverChange(null)}
+      onMouseDown={(e) => { e.preventDefault(); handlePointerDown(e.clientX) }}
+      onMouseMove={(e) => handlePointerMove(e.clientX)}
+      onMouseUp={handlePointerUp}
+      onMouseLeave={handlePointerLeave}
+      onTouchStart={(e) => { e.preventDefault(); if (e.touches[0]) handlePointerDown(e.touches[0].clientX) }}
+      onTouchMove={(e) => { e.preventDefault(); if (e.touches[0]) handlePointerMove(e.touches[0].clientX) }}
+      onTouchEnd={() => { handlePointerUp(); onHoverChange(null) }}
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
@@ -1510,7 +1586,7 @@ function PnlSparkline({
       />
 
       {/* Resting marker at current (rightmost) point */}
-      {hover == null && (
+      {hover == null && !rangeActive && (
         <>
           <circle cx={lastX} cy={lastY} r="5" fill={lineColor} opacity="0.18">
             <animate attributeName="r" values="4;7;4" dur="2.4s" repeatCount="indefinite" />
@@ -1521,7 +1597,7 @@ function PnlSparkline({
       )}
 
       {/* Hover crosshair + square marker (surveyor's mark) */}
-      {hover && (
+      {hover && !rangeActive && (
         <>
           {/* Vertical line (full height) */}
           <line
@@ -1543,6 +1619,49 @@ function PnlSparkline({
           <circle cx={hoverX} cy={hoverY} r="1.6" fill={lineColor} />
         </>
       )}
+
+      {/* Range selection overlay: shaded band + anchored markers + chord line */}
+      {rangeActive && (
+        <>
+          {/* Shaded band between anchor and endpoint */}
+          {rEndX !== rStartX && (
+            <rect
+              x={Math.min(rStartX, rEndX)}
+              y={padY - 4}
+              width={Math.abs(rEndX - rStartX)}
+              height={h + 8}
+              fill={rangeColor}
+              fillOpacity="0.08"
+            />
+          )}
+          {/* Vertical guides at both ends */}
+          <line
+            x1={rStartX} x2={rStartX} y1={padY - 8} y2={padY + h + 8}
+            stroke={rangeColor} strokeOpacity="0.55" strokeWidth="0.8" strokeDasharray="2,2"
+          />
+          <line
+            x1={rEndX} x2={rEndX} y1={padY - 8} y2={padY + h + 8}
+            stroke={rangeColor} strokeOpacity="0.55" strokeWidth="0.8" strokeDasharray="2,2"
+          />
+          {/* Chord connecting base to current point — makes the slope legible */}
+          {rEndX !== rStartX && (
+            <line
+              x1={rStartX} y1={rStartY} x2={rEndX} y2={rEndY}
+              stroke={rangeColor} strokeOpacity="0.6" strokeWidth="1"
+              strokeDasharray="3,2"
+            />
+          )}
+          {/* Base anchor (hollow circle) */}
+          <circle cx={rStartX} cy={rStartY} r="4.5" fill="#faf9f5" stroke={rangeColor} strokeWidth="1.6" />
+          <circle cx={rStartX} cy={rStartY} r="1.4" fill={rangeColor} />
+          {/* End marker (filled diamond) */}
+          <rect
+            x={rEndX - 4} y={rEndY - 4} width="8" height="8"
+            transform={`rotate(45 ${rEndX} ${rEndY})`}
+            fill={rangeColor} stroke={rangeColor} strokeWidth="1.4"
+          />
+        </>
+      )}
     </svg>
   )
 }
@@ -1556,9 +1675,10 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
 
   const [timeframe, setTimeframe] = useState<PnlInterval>("all")
   const [hoverIndex, setHoverIndex] = useState<number | null>(null)
+  const [range, setRange] = useState<PnlRange | null>(null)
 
-  // Reset the hover when switching timeframe
-  useEffect(() => { setHoverIndex(null) }, [timeframe])
+  // Reset hover + range when switching timeframe — indices don't carry across
+  useEffect(() => { setHoverIndex(null); setRange(null) }, [timeframe])
 
   const series = pnlMap[timeframe] ?? pnlMap.all ?? []
 
@@ -1573,14 +1693,44 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
     ? "All-Time P/L"
     : `${INTERVAL_LABELS[timeframe]} Change`
 
-  // If hovering, surface the instantaneous cumulative at that point.
+  // Range selection takes priority over hover — normalize so start <= end
+  const rangePts = range && series.length >= 2
+    ? (() => {
+        const a = Math.min(range.start, range.end)
+        const b = Math.max(range.start, range.end)
+        return { start: series[a], end: series[b], sameIdx: a === b }
+      })()
+    : null
+
   const hoverPoint = hoverIndex != null ? series[hoverIndex] : null
-  const shownValue = hoverPoint ? hoverPoint.p : defaultValue
-  const shownLabel = hoverPoint
-    ? new Date(hoverPoint.t * 1000).toLocaleString("en-US", {
-        month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
-      })
-    : defaultLabel
+
+  let shownValue: number
+  let shownLabel: string
+  let rangePct: number | null = null
+  let rangeDuration = ""
+
+  if (rangePts) {
+    const delta = rangePts.end.p - rangePts.start.p
+    shownValue = delta
+    const base = Math.abs(rangePts.start.p)
+    rangePct = base > 0.5 ? (delta / base) * 100 : null
+    rangeDuration = formatDuration(rangePts.end.t - rangePts.start.t)
+    if (rangePts.sameIdx) {
+      // Single-point anchor: show the base P/L as the hero number
+      shownValue = rangePts.start.p
+      shownLabel = `Base · ${fmtRange(rangePts.start.t)}`
+    } else {
+      shownLabel = `${fmtRange(rangePts.start.t)} → ${fmtRange(rangePts.end.t)}`
+    }
+  } else if (hoverPoint) {
+    shownValue = hoverPoint.p
+    shownLabel = new Date(hoverPoint.t * 1000).toLocaleString("en-US", {
+      month: "short", day: "numeric", hour: "numeric", minute: "2-digit",
+    })
+  } else {
+    shownValue = defaultValue
+    shownLabel = defaultLabel
+  }
 
   const shownGain = shownValue >= 0
   const shownColor = shownGain ? "text-emerald-700" : "text-[#b53333]"
@@ -1704,16 +1854,38 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
             {/* Sub-line reserved at fixed height so vertical stacking stays stable
                 between default and scrubbing states. */}
             <div className="text-[11px] text-muted-foreground mt-2 tabular-nums min-h-[1.5em]">
-              {hoverPoint
-                ? <>Scrubbing · release to resume</>
-                : <>Lifetime net · Polymarket{sinceLabel && <> · since {sinceLabel}</>}</>}
+              {rangePts && !rangePts.sameIdx ? (
+                <span className={shownColor}>
+                  {shownGain ? "▲" : "▼"}{" "}
+                  {rangePct != null
+                    ? `${formatPct(Math.abs(rangePct))}`
+                    : "—"}
+                  <span className="mx-2 text-muted-foreground/40">·</span>
+                  <span className="text-muted-foreground font-normal">{rangeDuration} elapsed</span>
+                </span>
+              ) : rangePts?.sameIdx ? (
+                <>Base anchored · drag to measure change</>
+              ) : hoverPoint ? (
+                <>Scrubbing · release to resume</>
+              ) : (
+                <>Lifetime net · Polymarket{sinceLabel && <> · since {sinceLabel}</>}</>
+              )}
             </div>
             <div className="text-[10px] text-muted-foreground/70 mt-1 tabular-nums min-h-[1.2em]">
-              {!hoverPoint && (p.resolved_count ?? 0) > 0 && (
-                <>
-                  {p.resolved_count} settled
-                  {p.resolved_losses ? <> · sunk {formatUsd(p.resolved_losses)}</> : null}
-                </>
+              {rangePts ? (
+                <button
+                  onClick={() => setRange(null)}
+                  className="text-muted-foreground/80 hover:text-foreground underline underline-offset-2 decoration-dotted cursor-pointer"
+                >
+                  clear selection
+                </button>
+              ) : (
+                !hoverPoint && (p.resolved_count ?? 0) > 0 && (
+                  <>
+                    {p.resolved_count} settled
+                    {p.resolved_losses ? <> · sunk {formatUsd(p.resolved_losses)}</> : null}
+                  </>
+                )
               )}
             </div>
           </div>
@@ -1733,6 +1905,8 @@ function PortfolioHero({ p, user }: { p: Portfolio; user: string }) {
                 gain={defaultValue >= 0}
                 hoverIndex={hoverIndex}
                 onHoverChange={setHoverIndex}
+                range={range}
+                onRangeChange={setRange}
               />
             </div>
             {/* Window scale rail: start, midline marker, end */}
@@ -1763,7 +1937,6 @@ function TopMoversRow({ positions }: { positions: Position[] }) {
     const bg = gain ? "bg-emerald-500/5 border-emerald-500/20" : "bg-[#b53333]/5 border-red-300/20"
     return (
       <div className={`relative overflow-hidden rounded-xl border ${bg} p-4`}>
-        <div className={`absolute top-0 left-0 right-0 h-px ${gain ? "bg-emerald-500/40" : "bg-[#b53333]/40"}`} />
         <div className="flex items-center justify-between mb-3">
           <span className="text-[10px] uppercase tracking-[0.25em] text-muted-foreground">{label}</span>
           <span className={`text-[10px] font-bold uppercase tracking-wider ${color}`}>
@@ -1959,161 +2132,10 @@ function PositionsBoard({ positions }: { positions: Position[] }) {
   )
 }
 
-interface ActivityDay {
-  label: string
-  sub: string
-  items: Activity[]
-  totalUsd: number
-}
-
-// Merge trades that are the same fill event — same side, same market + outcome,
-// same price, same block timestamp. On-chain sweeps often emit multiple rows
-// (one per counterparty match) that are really one user action.
-function aggregateActivity(items: Activity[]): Activity[] {
-  const groups = new Map<string, Activity>()
-  for (const a of items) {
-    const key = `${a.side}|${a.conditionId}|${a.outcomeIndex}|${a.price}|${a.timestamp}`
-    const existing = groups.get(key)
-    if (existing) {
-      existing.size += a.size
-      existing.usdcSize += a.usdcSize
-    } else {
-      groups.set(key, { ...a })
-    }
-  }
-  return Array.from(groups.values()).sort((x, y) => y.timestamp - x.timestamp)
-}
-
-function groupActivityByDay(items: Activity[]): ActivityDay[] {
-  const now = new Date()
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
-  const yesterday = new Date(today)
-  yesterday.setDate(yesterday.getDate() - 1)
-
-  const groups = new Map<string, { label: string; sub: string; items: Activity[]; totalUsd: number }>()
-  for (const item of items) {
-    const d = new Date(item.timestamp * 1000)
-    const day = new Date(d.getFullYear(), d.getMonth(), d.getDate())
-    const key = day.toISOString().slice(0, 10)
-
-    let label: string
-    if (day.getTime() === today.getTime()) label = "Today"
-    else if (day.getTime() === yesterday.getTime()) label = "Yesterday"
-    else label = d.toLocaleDateString("en-US", { weekday: "short" })
-    const sub = d.toLocaleDateString("en-US", { month: "short", day: "numeric" })
-
-    const entry = groups.get(key)
-    if (entry) {
-      entry.items.push(item)
-      entry.totalUsd += item.usdcSize
-    } else {
-      groups.set(key, { label, sub, items: [item], totalUsd: item.usdcSize })
-    }
-  }
-  return Array.from(groups.values())
-}
-
-function ActivityTimeline({ items }: { items: Activity[] }) {
-  if (items.length === 0) {
-    return (
-      <div className="space-y-3">
-        <div className="flex items-baseline justify-between pb-1">
-          <h2 className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Activity</h2>
-        </div>
-        <div className="text-center py-12 text-sm text-muted-foreground rounded-xl border border-dashed border-border/50">
-          No recent activity
-        </div>
-      </div>
-    )
-  }
-  const shown = aggregateActivity(items).slice(0, 50)
-  const days = groupActivityByDay(shown)
-  return (
-    <div className="space-y-3">
-      <div className="flex items-baseline justify-between pb-1">
-        <h2 className="text-[10px] uppercase tracking-[0.3em] text-muted-foreground">Activity</h2>
-        <span className="text-[10px] text-muted-foreground tabular-nums">
-          {shown.length} trade{shown.length === 1 ? "" : "s"}
-        </span>
-      </div>
-      <div className="rounded-xl border border-border/60 bg-card/40 backdrop-blur-sm overflow-hidden">
-        <div>
-          {days.map((day) => (
-            <div key={`${day.label}-${day.sub}`}>
-              {/* Sticky day header */}
-              <div className="sticky top-0 z-10 px-5 py-2 bg-card/95 backdrop-blur-sm border-b border-border/40 flex items-baseline justify-between">
-                <div className="flex items-baseline gap-2">
-                  <span className="text-[11px] font-bold uppercase tracking-[0.15em] text-foreground">{day.label}</span>
-                  <span className="text-[10px] text-muted-foreground">{day.sub}</span>
-                </div>
-                <span className="text-[10px] text-muted-foreground tabular-nums">
-                  {day.items.length} · {formatUsdCompact(day.totalUsd)}
-                </span>
-              </div>
-              {/* Trades */}
-              {day.items.map((a, i) => {
-                const buy = a.side === "BUY"
-                const sideColor = buy ? "text-emerald-700" : "text-[#b53333]"
-                const sideBg = buy ? "bg-emerald-500/10 border-emerald-500/20" : "bg-[#b53333]/10 border-red-300/20"
-                const href = a.eventSlug ? `https://polymarket.com/event/${a.eventSlug}` : undefined
-                return (
-                  <div
-                    key={`${a.transactionHash}-${a.conditionId ?? a.asset ?? i}`}
-                    className="relative px-5 py-3 border-b border-border/20 last:border-b-0 hover:bg-secondary/10 transition-colors"
-                  >
-                    <div className="flex items-start gap-3">
-                      {/* Side badge / icon column */}
-                      <div className="flex flex-col items-center shrink-0 pt-0.5">
-                        <div className={`w-7 h-7 rounded-md border ${sideBg} flex items-center justify-center`}>
-                          <span className={`text-[9px] font-black tracking-tight ${sideColor}`}>
-                            {buy ? "BUY" : "SELL"}
-                          </span>
-                        </div>
-                      </div>
-
-                      {/* Content */}
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-baseline justify-between gap-2 mb-1">
-                          {href ? (
-                            <a href={href} target="_blank" rel="noreferrer" className="text-xs font-semibold truncate hover:text-primary transition-colors">
-                              {cleanMatchupTitle(a.title)}
-                            </a>
-                          ) : (
-                            <span className="text-xs font-semibold truncate">{cleanMatchupTitle(a.title)}</span>
-                          )}
-                          <span className="text-[10px] text-muted-foreground shrink-0 tabular-nums">
-                            {formatRelativeTime(a.timestamp)}
-                          </span>
-                        </div>
-                        <div className="flex items-center gap-2 text-[11px]">
-                          <span className="px-1.5 py-0.5 rounded bg-secondary/60 text-foreground/70 truncate max-w-[110px]">
-                            {a.outcome}
-                          </span>
-                          <span className="text-muted-foreground tabular-nums">
-                            {a.size.toFixed(0)} × {formatPrice(a.price)}
-                          </span>
-                          <span className="ml-auto text-foreground font-semibold tabular-nums">
-                            {formatUsdCompact(a.usdcSize)}
-                          </span>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  )
-}
-
 function PortfolioPage() {
   const { username } = useParams()
   const user = username ?? "whycantilose"
   const [portfolio, setPortfolio] = useState<Portfolio | null>(null)
-  const [activity, setActivity] = useState<Activity[]>([])
 
   useEffect(() => {
     const controller = new AbortController()
@@ -2122,19 +2144,6 @@ function PortfolioPage() {
     const es = new EventSource(`/api/portfolio/${user}/stream`)
     es.onmessage = (e) => setPortfolio(JSON.parse(e.data))
     return () => { controller.abort(); es.close() }
-  }, [user])
-
-  useEffect(() => {
-    let cancelled = false
-    const load = () => {
-      fetch(`/api/portfolio/${user}/activity`)
-        .then(r => r.json())
-        .then(d => { if (!cancelled) setActivity(d.activity ?? []) })
-        .catch(() => {})
-    }
-    load()
-    const id = setInterval(load, 15000)
-    return () => { cancelled = true; clearInterval(id) }
   }, [user])
 
   if (!portfolio) {
@@ -2180,10 +2189,7 @@ function PortfolioPage() {
 
         <TopMoversRow positions={portfolio.positions} />
 
-        <div className="grid grid-cols-1 lg:grid-cols-[1fr_380px] gap-5">
-          <PositionsBoard positions={portfolio.positions} />
-          <ActivityTimeline items={activity} />
-        </div>
+        <PositionsBoard positions={portfolio.positions} />
       </div>
     </div>
   )

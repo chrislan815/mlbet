@@ -40,7 +40,7 @@ POLYMARKET_POLL = 30.0   # metadata only (market list, volume, questions) — or
 POLYMARKET_WS_PING = 10.0
 MLB_TAG_ID = 100381
 ODDS_IDLE_TIMEOUT = 30.0
-PORTFOLIO_POLL = 10.0            # positions/value refresh from data-api (activity every other tick)
+PORTFOLIO_POLL = 10.0            # positions/value refresh from data-api (lifetime P/L every other tick)
 PORTFOLIO_IDLE_TIMEOUT = 30.0
 
 # Username → proxy wallet. Extend as more accounts are added.
@@ -96,10 +96,9 @@ _ws_tasks: dict[int, asyncio.Task] = {}              # game_pk -> websocket pump
 _ws_tokens: dict[int, list[str]] = {}                # game_pk -> token_ids subscribed
 _odds_update_events: dict[int, asyncio.Event] = {}   # game_pk -> SSE wake signal
 
-# ── Portfolio cache (Polymarket account positions/activity/value) ───────
+# ── Portfolio cache (Polymarket account positions/value) ───────────────
 
 _portfolio_cache: dict[str, dict] = {}               # wallet -> positions snapshot from data-api
-_portfolio_activity_cache: dict[str, list] = {}      # wallet -> recent trades
 _portfolio_pnl_cache: dict[str, dict[str, list[dict]]] = {}  # wallet -> {interval -> series}
 _portfolio_last_request: dict[str, float] = {}       # wallet -> last SSE activity (idle tracking)
 _portfolio_tasks: dict[str, asyncio.Task] = {}       # wallet -> metadata poll task
@@ -889,18 +888,6 @@ async def _fetch_positions(wallet: str) -> list[dict]:
     return data if isinstance(data, list) else []
 
 
-async def _fetch_activity(wallet: str, limit: int = 50) -> list[dict]:
-    try:
-        resp = await http_client.get(
-            f"{POLY_DATA_API}/activity",
-            params={"user": wallet, "limit": str(limit)})
-        resp.raise_for_status()
-        data = resp.json()
-        return data if isinstance(data, list) else []
-    except Exception:
-        return []
-
-
 POLY_PNL_INTERVALS = ("1d", "1w", "1m", "all")
 
 
@@ -1143,7 +1130,7 @@ async def _ensure_portfolio_ws(wallet: str, token_ids: list[str]) -> None:
 
 
 async def _poll_portfolio_loop(wallet: str, username: str):
-    """Refresh positions + activity from data-api, keep the WS stream in sync.
+    """Refresh positions from data-api, keep the WS stream in sync.
     Stops when idle (no SSE/REST traffic for PORTFOLIO_IDLE_TIMEOUT)."""
     tick = 0
     while True:
@@ -1153,14 +1140,12 @@ async def _poll_portfolio_loop(wallet: str, username: str):
             break
 
         try:
-            # Activity + lifetime P/L refresh every other tick (~20s) and ride
-            # the same gather as positions to minimize round-trips.
+            # Lifetime P/L refresh every other tick (~20s) rides the same
+            # gather as positions to minimize round-trips.
             if tick % 2 == 0:
-                positions, activity, pnl_map = await asyncio.gather(
+                positions, pnl_map = await asyncio.gather(
                     _fetch_positions(wallet),
-                    _fetch_activity(wallet, 50),
                     _fetch_user_pnl_all(wallet))
-                _portfolio_activity_cache[wallet] = activity
                 if any(pnl_map.values()):
                     _portfolio_pnl_cache[wallet] = pnl_map
             else:
@@ -1191,7 +1176,6 @@ async def _poll_portfolio_loop(wallet: str, username: str):
     _portfolio_ws_tokens.pop(wallet, None)
     _portfolio_update_events.pop(wallet, None)
     _portfolio_cache.pop(wallet, None)
-    _portfolio_activity_cache.pop(wallet, None)
     _portfolio_pnl_cache.pop(wallet, None)
     _portfolio_last_request.pop(wallet, None)
     _portfolio_tasks.pop(wallet, None)
@@ -1491,19 +1475,6 @@ async def portfolio_stream(username: str, request: Request):
     return StreamingResponse(
         generate(), media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
-
-
-@app.get("/api/portfolio/{username}/activity")
-async def portfolio_activity(username: str, limit: int = Query(default=50, ge=1, le=200)):
-    wallet = _resolve_wallet(username)
-    if not wallet:
-        return JSONResponse({"error": "Unknown user"}, status_code=404)
-    _portfolio_last_request[wallet] = asyncio.get_event_loop().time()
-    activity = _portfolio_activity_cache.get(wallet)
-    if activity is None:
-        activity = await _fetch_activity(wallet, limit)
-        _portfolio_activity_cache[wallet] = activity
-    return {"wallet": wallet, "activity": activity[:limit]}
 
 
 @app.get("/{path:path}")

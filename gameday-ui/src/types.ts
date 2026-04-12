@@ -175,21 +175,3 @@ export interface Portfolio {
   updated_at?: string
 }
 
-export interface Activity {
-  proxyWallet: string
-  timestamp: number
-  conditionId: string
-  type: string
-  size: number
-  usdcSize: number
-  transactionHash: string
-  price: number
-  asset: string
-  side: "BUY" | "SELL"
-  outcomeIndex: number
-  title: string
-  slug: string
-  icon: string
-  eventSlug: string
-  outcome: string
-}
