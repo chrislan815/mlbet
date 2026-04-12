@@ -1238,13 +1238,13 @@ async def games(date: str | None = Query(default=None)):
     else:
         target = datetime.now().date()
 
-    # For today and future dates, always fetch live schedule from MLB API
-    # so pre-game / scheduled games show up before they're ingested.
-    if target >= datetime.now().date():
-        api_games = await _fetch_mlb_schedule(target)
-        if api_games:
-            # Merge with DB data for richer info on games already ingested
-            db_by_pk = {}
+    async def _db_rows_for(d) -> list[dict]:
+        # Isolated so a DB failure here never sinks the whole endpoint —
+        # for today/future the MLB API is a full substitute; for past dates
+        # we return [] and the UI shows "no games" rather than a 500.
+        if pool is None:
+            return []
+        try:
             async with pool.acquire() as conn:
                 rows = await conn.fetch(
                     'SELECT game_pk, status, home_team_name, away_team_name,'
@@ -1252,10 +1252,18 @@ async def games(date: str | None = Query(default=None)):
                     '  venue_name, game_datetime, game_date'
                     ' FROM game WHERE game_date = $1'
                     ' ORDER BY game_datetime',
-                    str(target))
-            for r in rows:
-                db_by_pk[r["game_pk"]] = dict(r)
+                    str(d))
+            return [dict(r) for r in rows]
+        except Exception as exc:
+            print(f"[games] DB lookup failed for {d}: {exc!r}")
+            return []
 
+    # For today and future dates, always fetch live schedule from MLB API
+    # so pre-game / scheduled games show up before they're ingested.
+    if target >= datetime.now().date():
+        api_games = await _fetch_mlb_schedule(target)
+        if api_games:
+            db_by_pk = {r["game_pk"]: r for r in await _db_rows_for(target)}
             result = []
             for g in api_games:
                 db_row = db_by_pk.get(g["game_pk"])
@@ -1269,19 +1277,10 @@ async def games(date: str | None = Query(default=None)):
                     result.append(g)
             return result
 
-    # Past dates: DB only — normalize stale live statuses to Final
-    async with pool.acquire() as conn:
-        rows = await conn.fetch(
-            'SELECT game_pk, status, home_team_name, away_team_name,'
-            '  home_score, away_score, current_inning, inning_state,'
-            '  venue_name, game_datetime, game_date'
-            ' FROM game WHERE game_date = $1'
-            ' ORDER BY game_datetime',
-            str(target))
-
+    # Past dates (or today with empty API response): DB only —
+    # normalize stale live statuses to Final
     result = []
-    for r in rows:
-        d = dict(r)
+    for d in await _db_rows_for(target):
         if d.get("status") in LIVE_STATUSES:
             d["status"] = "Final"
         d["slug"] = _game_slug(d.get("away_team_name", ""), d.get("home_team_name", ""), str(d.get("game_date", "")))
